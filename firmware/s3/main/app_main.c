@@ -190,16 +190,40 @@ static void wait_for_behavior_idle(uint32_t timeout_ms);
 #define LOG_HEAP_STATE(stage) ((void)0)
 #endif
 
-static bool transport_has_wifi_resume_headroom(void) {
+static bool transport_has_wifi_resume_headroom_with_log(bool log_failure) {
     size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     size_t min_largest_internal = s_low_memory_recovery_active ? WIFI_RESUME_RECOVERY_MIN_INTERNAL_LARGEST_BYTES
                                                                : WIFI_RESUME_MIN_INTERNAL_LARGEST_BYTES;
 
     if (free_internal < WIFI_RESUME_MIN_INTERNAL_FREE_BYTES || largest_internal < min_largest_internal) {
-        ESP_LOGW(TAG, "Deferring WiFi resume due to low internal heap: free=%u largest=%u (need >=%u / >=%u)%s",
-                 (unsigned)free_internal, (unsigned)largest_internal, (unsigned)WIFI_RESUME_MIN_INTERNAL_FREE_BYTES,
-                 (unsigned)min_largest_internal, s_low_memory_recovery_active ? " [low-memory recovery]" : "");
+        if (log_failure) {
+            ESP_LOGW(TAG, "Deferring WiFi resume due to low internal heap: free=%u largest=%u (need >=%u / >=%u)%s",
+                     (unsigned)free_internal, (unsigned)largest_internal, (unsigned)WIFI_RESUME_MIN_INTERNAL_FREE_BYTES,
+                     (unsigned)min_largest_internal, s_low_memory_recovery_active ? " [low-memory recovery]" : "");
+        }
+        return false;
+    }
+
+    return true;
+}
+
+static bool transport_has_wifi_resume_headroom(void) {
+    return transport_has_wifi_resume_headroom_with_log(true);
+}
+
+static bool transport_has_ws_start_headroom_with_log(bool log_failure) {
+    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t min_largest_internal = s_low_memory_recovery_active ? WS_START_RECOVERY_MIN_INTERNAL_LARGEST_BYTES
+                                                               : WS_START_MIN_INTERNAL_LARGEST_BYTES;
+
+    if (free_internal < WS_START_MIN_INTERNAL_FREE_BYTES || largest_internal < min_largest_internal) {
+        if (log_failure) {
+            ESP_LOGW(TAG, "Deferring WebSocket start due to low internal heap: free=%u largest=%u (need >=%u / >=%u)%s",
+                     (unsigned)free_internal, (unsigned)largest_internal, (unsigned)WS_START_MIN_INTERNAL_FREE_BYTES,
+                     (unsigned)min_largest_internal, s_low_memory_recovery_active ? " [low-memory recovery]" : "");
+        }
         return false;
     }
 
@@ -207,19 +231,7 @@ static bool transport_has_wifi_resume_headroom(void) {
 }
 
 static bool transport_has_ws_start_headroom(void) {
-    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    size_t min_largest_internal = s_low_memory_recovery_active ? WS_START_RECOVERY_MIN_INTERNAL_LARGEST_BYTES
-                                                               : WS_START_MIN_INTERNAL_LARGEST_BYTES;
-
-    if (free_internal < WS_START_MIN_INTERNAL_FREE_BYTES || largest_internal < min_largest_internal) {
-        ESP_LOGW(TAG, "Deferring WebSocket start due to low internal heap: free=%u largest=%u (need >=%u / >=%u)%s",
-                 (unsigned)free_internal, (unsigned)largest_internal, (unsigned)WS_START_MIN_INTERNAL_FREE_BYTES,
-                 (unsigned)min_largest_internal, s_low_memory_recovery_active ? " [low-memory recovery]" : "");
-        return false;
-    }
-
-    return true;
+    return transport_has_ws_start_headroom_with_log(true);
 }
 
 static bool transport_has_cloud_runtime_headroom(void) {
@@ -522,16 +534,25 @@ static bool transport_start_ws_transport(const char *ws_url, const char *start_r
         return false;
     }
 
-    transport_prepare_display_for_ws_start();
-
     if (!transport_has_ws_start_headroom()) {
+        bool recovery_was_active = s_low_memory_recovery_active;
+
         s_consecutive_ws_start_defers += 1U;
         if (!s_low_memory_recovery_active &&
             s_consecutive_ws_start_defers >= WS_START_LOW_MEMORY_RECOVERY_DEFERS) {
             transport_enter_low_memory_recovery("repeated ws start low internal heap");
         }
 
-        if (!transport_has_ws_start_headroom()) {
+        if (s_low_memory_recovery_active != recovery_was_active) {
+            if (!transport_has_ws_start_headroom()) {
+                LOG_HEAP_STATE("ws_start_deferred");
+                transport_schedule_retry(CLOUD_RETRY_DELAY_MS);
+                transport_set_state(TRANSPORT_BLE_IDLE_CLOUD_SUSPENDED, s_low_memory_recovery_active
+                                                                            ? "low-memory recovery waiting ws heap headroom"
+                                                                            : "waiting ws heap headroom");
+                return false;
+            }
+        } else {
             LOG_HEAP_STATE("ws_start_deferred");
             transport_schedule_retry(CLOUD_RETRY_DELAY_MS);
             transport_set_state(TRANSPORT_BLE_IDLE_CLOUD_SUSPENDED, s_low_memory_recovery_active
@@ -541,6 +562,7 @@ static bool transport_start_ws_transport(const char *ws_url, const char *start_r
         }
     }
 
+    transport_prepare_display_for_ws_start();
     LOG_HEAP_STATE("before_ws_start");
     if (ws_client_start() != 0) {
         transport_stop_ws("ws start failed");
@@ -569,16 +591,25 @@ static bool transport_try_cached_ws_resume(void) {
         return false;
     }
 
-    transport_prepare_display_for_ws_start();
-
     if (!transport_has_ws_start_headroom()) {
+        bool recovery_was_active = s_low_memory_recovery_active;
+
         s_consecutive_ws_start_defers += 1U;
         if (!s_low_memory_recovery_active &&
             s_consecutive_ws_start_defers >= WS_START_LOW_MEMORY_RECOVERY_DEFERS) {
             transport_enter_low_memory_recovery("repeated ws start low internal heap");
         }
 
-        if (!transport_has_ws_start_headroom()) {
+        if (s_low_memory_recovery_active != recovery_was_active) {
+            if (!transport_has_ws_start_headroom()) {
+                LOG_HEAP_STATE("cached_ws_start_deferred");
+                transport_schedule_retry(CLOUD_RETRY_DELAY_MS);
+                transport_set_state(TRANSPORT_BLE_IDLE_CLOUD_SUSPENDED, s_low_memory_recovery_active
+                                                                            ? "low-memory recovery waiting cached ws heap headroom"
+                                                                            : "waiting cached ws heap headroom");
+                return true;
+            }
+        } else {
             LOG_HEAP_STATE("cached_ws_start_deferred");
             transport_schedule_retry(CLOUD_RETRY_DELAY_MS);
             transport_set_state(TRANSPORT_BLE_IDLE_CLOUD_SUSPENDED, s_low_memory_recovery_active
@@ -588,6 +619,7 @@ static bool transport_try_cached_ws_resume(void) {
         }
     }
 
+    transport_prepare_display_for_ws_start();
     LOG_HEAP_STATE("before_cached_ws_start");
     if (ws_client_start() != 0) {
         transport_stop_ws("cached ws start failed");
@@ -855,13 +887,23 @@ static void transport_begin_wifi_resume(const char *reason) {
     }
 
     if (!transport_has_wifi_resume_headroom()) {
+        bool recovery_was_active = s_low_memory_recovery_active;
+
         s_consecutive_wifi_resume_defers += 1U;
         if (!s_low_memory_recovery_active &&
             s_consecutive_wifi_resume_defers >= WIFI_RESUME_LOW_MEMORY_RECOVERY_DEFERS) {
             transport_enter_low_memory_recovery("repeated low internal heap");
         }
 
-        if (!transport_has_wifi_resume_headroom()) {
+        if (s_low_memory_recovery_active != recovery_was_active) {
+            if (!transport_has_wifi_resume_headroom()) {
+                transport_schedule_retry(CLOUD_RETRY_DELAY_MS);
+                transport_set_state(TRANSPORT_BLE_IDLE_CLOUD_SUSPENDED, s_low_memory_recovery_active
+                                                                            ? "low-memory recovery waiting heap headroom"
+                                                                            : "waiting heap headroom");
+                return;
+            }
+        } else {
             transport_schedule_retry(CLOUD_RETRY_DELAY_MS);
             transport_set_state(TRANSPORT_BLE_IDLE_CLOUD_SUSPENDED, s_low_memory_recovery_active
                                                                         ? "low-memory recovery waiting heap headroom"
@@ -1017,7 +1059,9 @@ static void transport_coordinator_tick(void) {
     }
 
     s_waiting_for_wifi_provision = false;
-    transport_reset_low_memory_recovery("wifi restored");
+    if (!s_low_memory_recovery_active) {
+        transport_reset_low_memory_recovery("wifi restored");
+    }
 
     if (!s_discovery_initialized) {
         if (discovery_init() == 0) {

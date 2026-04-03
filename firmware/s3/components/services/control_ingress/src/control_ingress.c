@@ -36,6 +36,16 @@ typedef struct {
 static QueueHandle_t s_state_queue = NULL;
 static TaskHandle_t s_state_task = NULL;
 
+static bool control_ai_status_equals(const control_ai_status_request_t *a, const control_ai_status_request_t *b) {
+    if (a == NULL || b == NULL) {
+        return false;
+    }
+
+    return strcmp(a->status, b->status) == 0 && strcmp(a->message, b->message) == 0 &&
+           strcmp(a->image_name, b->image_name) == 0 && strcmp(a->action_file, b->action_file) == 0 &&
+           strcmp(a->sound_file, b->sound_file) == 0;
+}
+
 static bool control_contains_nocase(const char *haystack, const char *needle) {
     size_t needle_len;
 
@@ -145,7 +155,7 @@ static const char *control_ai_status_to_fallback(const char *status, const char 
     return NULL;
 }
 
-static void control_apply_ai_status(const control_ai_status_request_t *req) {
+static esp_err_t control_apply_ai_status(const control_ai_status_request_t *req) {
     char action_state_id[sizeof(req->action_file)];
     char status_state_id[sizeof(req->status)];
     char fallback_state_id[sizeof(req->status)];
@@ -220,10 +230,14 @@ static void control_apply_ai_status(const control_ai_status_request_t *req) {
     if (ret != ESP_OK && ret != ESP_ERR_NOT_FOUND) {
         ESP_LOGW(TAG, "AI status apply failed: %s", esp_err_to_name(ret));
     }
+
+    return ret;
 }
 
 static void control_state_task(void *arg) {
     control_state_msg_t msg;
+    control_ai_status_request_t last_ai_status = {0};
+    bool last_ai_status_valid = false;
 
     (void)arg;
 
@@ -233,12 +247,30 @@ static void control_state_task(void *arg) {
         }
 
         switch (msg.type) {
-            case CONTROL_STATE_MSG_AI_STATUS:
-                control_apply_ai_status(&msg.data.ai_status);
+            case CONTROL_STATE_MSG_AI_STATUS: {
+                esp_err_t ret;
+
+                if (last_ai_status_valid && control_ai_status_equals(&last_ai_status, &msg.data.ai_status)) {
+                    ESP_LOGI(TAG,
+                             "Suppress duplicate AI status: status=%s image=%s action=%s sound=%s",
+                             msg.data.ai_status.status,
+                             msg.data.ai_status.image_name[0] != '\0' ? msg.data.ai_status.image_name : "<none>",
+                             msg.data.ai_status.action_file[0] != '\0' ? msg.data.ai_status.action_file : "<none>",
+                             msg.data.ai_status.sound_file[0] != '\0' ? msg.data.ai_status.sound_file : "<none>");
+                    break;
+                }
+
+                ret = control_apply_ai_status(&msg.data.ai_status);
+                if (ret == ESP_OK || ret == ESP_ERR_NOT_FOUND) {
+                    last_ai_status = msg.data.ai_status;
+                    last_ai_status_valid = true;
+                }
                 break;
+            }
 
             case CONTROL_STATE_MSG_STATE_SET: {
                 esp_err_t ret = behavior_state_set(msg.data.state_set.state_id);
+                last_ai_status_valid = false;
                 if (ret != ESP_OK) {
                     ESP_LOGW(TAG, "State set failed: state=%s err=%s", msg.data.state_set.state_id, esp_err_to_name(ret));
                 }
@@ -248,6 +280,7 @@ static void control_state_task(void *arg) {
             case CONTROL_STATE_MSG_STATE_TEXT: {
                 const char *text = msg.data.state_text.text[0] != '\0' ? msg.data.state_text.text : NULL;
                 esp_err_t ret;
+                last_ai_status_valid = false;
 
                 if (msg.data.state_text.state_id[0] != '\0') {
                     ret = behavior_state_set_with_text(msg.data.state_text.state_id, text, msg.data.state_text.font_size);
