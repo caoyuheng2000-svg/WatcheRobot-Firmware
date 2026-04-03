@@ -112,6 +112,8 @@ typedef struct {
     bool text_override_alert;
     char anim_override[BEHAVIOR_STATE_ID_LEN];
     bool anim_override_valid;
+    char sound_override[BEHAVIOR_SOUND_ID_LEN];
+    bool sound_override_valid;
     bool suppress_state_sound_events;
     bool wait_for_local_sfx_completion;
     bool hold_logged;
@@ -1087,6 +1089,8 @@ static void behavior_reset_runtime_locked(void) {
     s_ctx.text_override_alert = false;
     s_ctx.anim_override[0] = '\0';
     s_ctx.anim_override_valid = false;
+    s_ctx.sound_override[0] = '\0';
+    s_ctx.sound_override_valid = false;
     s_ctx.suppress_state_sound_events = false;
     s_ctx.wait_for_local_sfx_completion = false;
     s_ctx.hold_logged = false;
@@ -1094,6 +1098,18 @@ static void behavior_reset_runtime_locked(void) {
 
 static bool behavior_is_valid_anim_id(const char *anim_id) {
     return anim_id != NULL && anim_id[0] != '\0' && display_emoji_from_string(anim_id) != EMOJI_UNKNOWN;
+}
+
+static bool behavior_is_nonempty_string(const char *value) {
+    return value != NULL && value[0] != '\0';
+}
+
+static bool behavior_matches_nullable_override(const char *current, bool current_valid, const char *requested) {
+    if (!behavior_is_nonempty_string(requested)) {
+        return !current_valid;
+    }
+
+    return current_valid && strcmp(current, requested) == 0;
 }
 
 static bool behavior_is_same_state_action_request_locked(const char *state_id, const char *action_id) {
@@ -1108,6 +1124,35 @@ static bool behavior_is_same_state_action_request_locked(const char *state_id, c
     return strcmp(action_id, s_ctx.current_action_id) == 0;
 }
 
+static bool behavior_is_same_display_request_locked(const char *text, int font_size, bool alert_text, const char *anim_id) {
+    if ((text != NULL) != s_ctx.text_override_valid) {
+        return false;
+    }
+    if (text != NULL && strcmp(s_ctx.text_override, text) != 0) {
+        return false;
+    }
+    if (text != NULL && (s_ctx.text_override_font_size != font_size || s_ctx.text_override_alert != alert_text)) {
+        return false;
+    }
+    if (!behavior_matches_nullable_override(s_ctx.anim_override, s_ctx.anim_override_valid, anim_id)) {
+        return false;
+    }
+
+    return true;
+}
+
+static bool behavior_is_same_override_request_locked(const char *text,
+                                                     int font_size,
+                                                     bool alert_text,
+                                                     const char *anim_id,
+                                                     const char *sound_id) {
+    if (!behavior_is_same_display_request_locked(text, font_size, alert_text, anim_id)) {
+        return false;
+    }
+
+    return behavior_matches_nullable_override(s_ctx.sound_override, s_ctx.sound_override_valid, sound_id);
+}
+
 static void behavior_set_anim_override_locked(const char *anim_id) {
     if (behavior_is_valid_anim_id(anim_id)) {
         behavior_copy_string(s_ctx.anim_override, sizeof(s_ctx.anim_override), anim_id);
@@ -1115,6 +1160,16 @@ static void behavior_set_anim_override_locked(const char *anim_id) {
     } else {
         s_ctx.anim_override[0] = '\0';
         s_ctx.anim_override_valid = false;
+    }
+}
+
+static void behavior_set_sound_override_locked(const char *sound_id) {
+    if (behavior_is_nonempty_string(sound_id)) {
+        behavior_copy_string(s_ctx.sound_override, sizeof(s_ctx.sound_override), sound_id);
+        s_ctx.sound_override_valid = true;
+    } else {
+        s_ctx.sound_override[0] = '\0';
+        s_ctx.sound_override_valid = false;
     }
 }
 
@@ -1264,11 +1319,12 @@ static void behavior_dispatch_sound_locked(const behavior_sound_event_t *event) 
 static bool behavior_apply_sound_override_locked(const char *sound_id) {
     esp_err_t ret;
 
-    if (sound_id == NULL || sound_id[0] == '\0') {
+    behavior_set_sound_override_locked(sound_id);
+    if (!s_ctx.sound_override_valid) {
         return false;
     }
 
-    ret = behavior_dispatch_sound_id_locked(sound_id);
+    ret = behavior_dispatch_sound_id_locked(s_ctx.sound_override);
     if (ret == ESP_OK) {
         s_ctx.wait_for_local_sfx_completion = true;
     }
@@ -1375,10 +1431,22 @@ static esp_err_t behavior_schedule_state_locked(const char *state_id,
 
         effective_state_id = s_ctx.catalog.default_state;
         if (behavior_is_same_state_action_request_locked(effective_state_id, action_def != NULL ? action_def->id : NULL)) {
-            ESP_LOGI(TAG,
-                     "Ignoring repeated state/action request: state=%s action=%s",
-                     effective_state_id,
-                     action_def != NULL ? action_def->id : "<none>");
+            bool same_overrides = behavior_is_same_override_request_locked(text, font_size, alert_text, anim_id, sound_id);
+
+            if (same_overrides) {
+                ESP_LOGI(TAG,
+                         "Ignoring repeated request with unchanged overrides: state=%s action=%s",
+                         effective_state_id,
+                         action_def != NULL ? action_def->id : "<none>");
+            } else {
+                ESP_LOGI(TAG,
+                         "Refreshing repeated state/action request with updated overrides: state=%s action=%s",
+                         effective_state_id,
+                         action_def != NULL ? action_def->id : "<none>");
+            }
+            if (same_overrides) {
+                return ESP_OK;
+            }
             s_ctx.text_override_valid = (text != NULL);
             behavior_copy_string(s_ctx.text_override, sizeof(s_ctx.text_override), text);
             s_ctx.text_override_font_size = font_size;
@@ -1413,6 +1481,7 @@ static esp_err_t behavior_schedule_state_locked(const char *state_id,
         s_ctx.text_override_font_size = font_size;
         s_ctx.text_override_alert = alert_text;
         behavior_set_anim_override_locked(anim_id);
+        behavior_set_sound_override_locked(sound_id);
         s_ctx.suppress_state_sound_events = false;
         s_ctx.wait_for_local_sfx_completion = false;
         s_ctx.hold_logged = false;
@@ -1432,10 +1501,22 @@ static esp_err_t behavior_schedule_state_locked(const char *state_id,
 
     effective_state_id = state_def->id;
     if (behavior_is_same_state_action_request_locked(effective_state_id, action_def != NULL ? action_def->id : NULL)) {
-        ESP_LOGI(TAG,
-                 "Ignoring repeated state/action request: state=%s action=%s",
-                 effective_state_id,
-                 action_def != NULL ? action_def->id : "<none>");
+        bool same_overrides = behavior_is_same_override_request_locked(text, font_size, alert_text, anim_id, sound_id);
+
+        if (same_overrides) {
+            ESP_LOGI(TAG,
+                     "Ignoring repeated request with unchanged overrides: state=%s action=%s",
+                     effective_state_id,
+                     action_def != NULL ? action_def->id : "<none>");
+        } else {
+            ESP_LOGI(TAG,
+                     "Refreshing repeated state/action request with updated overrides: state=%s action=%s",
+                     effective_state_id,
+                     action_def != NULL ? action_def->id : "<none>");
+        }
+        if (same_overrides) {
+            return ESP_OK;
+        }
         s_ctx.text_override_valid = (text != NULL);
         behavior_copy_string(s_ctx.text_override, sizeof(s_ctx.text_override), text);
         s_ctx.text_override_font_size = font_size;
@@ -1465,6 +1546,7 @@ static esp_err_t behavior_schedule_state_locked(const char *state_id,
     s_ctx.text_override_font_size = font_size;
     s_ctx.text_override_alert = alert_text;
     behavior_set_anim_override_locked(anim_id);
+    behavior_set_sound_override_locked(sound_id);
     s_ctx.wait_for_local_sfx_completion = false;
     s_ctx.suppress_state_sound_events = behavior_apply_sound_override_locked(sound_id);
     s_ctx.hold_logged = false;
@@ -1530,6 +1612,8 @@ static void behavior_task(void *arg) {
                             s_ctx.text_override_alert = false;
                             s_ctx.anim_override[0] = '\0';
                             s_ctx.anim_override_valid = false;
+                            s_ctx.sound_override[0] = '\0';
+                            s_ctx.sound_override_valid = false;
                             s_ctx.suppress_state_sound_events = false;
                             s_ctx.wait_for_local_sfx_completion = false;
                             s_ctx.hold_logged = false;
