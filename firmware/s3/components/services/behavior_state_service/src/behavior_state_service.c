@@ -31,10 +31,13 @@
 #define BEHAVIOR_TEXT_LEN 128
 #define BEHAVIOR_SOUND_ID_LEN 32
 #define BEHAVIOR_ACTION_PATH_LEN 160
+/* Behavior resources use installation-space logical angles; HAL maps logical
+ * 90 deg to the MS90 neutral pulse of 1500us. */
 #define BEHAVIOR_ACTION_DEFAULT_X_DEG 90
 #define BEHAVIOR_ACTION_DEFAULT_Y_DEG 120
 #define BEHAVIOR_DEFAULT_ONESHOT_HOLD_MS 1200U
 #define BEHAVIOR_QUERY_LOCK_TIMEOUT_MS 5U
+#define BEHAVIOR_SET_LOCK_TIMEOUT_MS 100U
 #define BEHAVIOR_QUERY_TIMEOUT_LOG_INTERVAL_MS 1000U
 
 typedef struct {
@@ -654,6 +657,8 @@ static esp_err_t behavior_parse_action_file(const char *action_id,
                 continue;
             }
 
+            /* rotation_angle values in action JSON stay in the existing
+             * installation-space logical angle system (0-180, neutral at 90). */
             angle_deg = (int)(rotation_item->valuedouble >= 0.0 ? (rotation_item->valuedouble + 0.5)
                                                                 : (rotation_item->valuedouble - 0.5));
             if (frame_number > max_keyframe) {
@@ -1791,8 +1796,13 @@ static esp_err_t behavior_state_set_with_resources_and_action_internal(const cha
         return ESP_FAIL;
     }
 
-    if (!behavior_lock()) {
-        return ESP_FAIL;
+    if (!behavior_lock_with_timeout(BEHAVIOR_SET_LOCK_TIMEOUT_MS)) {
+        ESP_LOGW(TAG,
+                 "State request lock timeout state=%s action=%s after %u ms",
+                 state_id,
+                 action_id != NULL ? action_id : "<none>",
+                 (unsigned)BEHAVIOR_SET_LOCK_TIMEOUT_MS);
+        return ESP_ERR_TIMEOUT;
     }
 
     behavior_clear_display_request(&display_request);
