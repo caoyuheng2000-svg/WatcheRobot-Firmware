@@ -69,7 +69,7 @@ python -m tools.win_flasher flash --port COM41
 Flash a manually selected ZIP:
 
 ```powershell
-python -m tools.win_flasher flash --zip C:\path\to\WatcheRobot-S3-v0.1.7-esp32s3.zip --port COM41
+python -m tools.win_flasher flash --zip C:\path\to\WatcheRobot-S3-v0.1.8-esp32s3.zip --port COM41
 ```
 
 Flash and then open a short serial monitor:
