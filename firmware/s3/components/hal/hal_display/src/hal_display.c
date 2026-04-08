@@ -25,6 +25,22 @@
 extern const lv_font_t lv_font_simsun_16_cjk;
 #endif
 
+#if LV_FONT_MONTSERRAT_14
+extern const lv_font_t lv_font_montserrat_14;
+#endif
+
+#if LV_FONT_MONTSERRAT_20
+extern const lv_font_t lv_font_montserrat_20;
+#endif
+
+#if LV_FONT_MONTSERRAT_22
+extern const lv_font_t lv_font_montserrat_22;
+#endif
+
+#if LV_FONT_MONTSERRAT_24
+extern const lv_font_t lv_font_montserrat_24;
+#endif
+
 #include "esp_lvgl_port.h"
 
 #define TAG "HAL_DISPLAY"
@@ -46,6 +62,64 @@ static esp_lcd_panel_io_handle_t s_panel_io_handle = NULL;
 static esp_lcd_panel_handle_t s_panel_handle = NULL;
 static esp_lcd_panel_io_handle_t s_touch_io_handle = NULL;
 static esp_lcd_touch_handle_t s_touch_handle = NULL;
+
+static bool hal_display_text_has_non_ascii(const char *text) {
+    const unsigned char *cursor = (const unsigned char *)text;
+
+    if (text == NULL) {
+        return false;
+    }
+
+    while (*cursor != '\0') {
+        if (*cursor > 0x7F) {
+            return true;
+        }
+        cursor++;
+    }
+
+    return false;
+}
+
+static const lv_font_t *hal_display_select_text_font(const char *text, int font_size) {
+    bool use_cjk_font = hal_display_text_has_non_ascii(text);
+
+#if LV_FONT_SIMSUN_16_CJK
+    if (use_cjk_font) {
+        return &lv_font_simsun_16_cjk;
+    }
+#else
+    (void)use_cjk_font;
+#endif
+
+    if (font_size == 22) {
+#if LV_FONT_MONTSERRAT_22
+        return &lv_font_montserrat_22;
+#endif
+    } else if (font_size == 20) {
+#if LV_FONT_MONTSERRAT_20
+        return &lv_font_montserrat_20;
+#endif
+    } else if (font_size == 0 || font_size >= 24) {
+#if LV_FONT_MONTSERRAT_24
+        return &lv_font_montserrat_24;
+#endif
+    }
+
+#if LV_FONT_MONTSERRAT_14
+    return &lv_font_montserrat_14;
+#elif LV_FONT_SIMSUN_16_CJK
+    return &lv_font_simsun_16_cjk;
+#else
+    return LV_FONT_DEFAULT;
+#endif
+}
+
+static void hal_display_apply_text_style_locked(const char *text, int font_size, lv_color_t text_color) {
+    const lv_font_t *font = hal_display_select_text_font(text, font_size);
+
+    lv_obj_set_style_text_font(label_text, font, 0);
+    lv_obj_set_style_text_color(label_text, text_color, 0);
+}
 
 static void hal_display_general_i2c_delay(void) {
     esp_rom_delay_us(GENERAL_I2C_BITBANG_DELAY_US);
@@ -699,14 +773,7 @@ int hal_display_init(void) {
     lv_label_set_text(label_text, "Ready");
     lv_obj_set_style_text_color(label_text, lv_color_white(), 0);
     lv_obj_align(label_text, LV_ALIGN_CENTER, 0, -140); /* Move higher to avoid emoji overlap */
-
-    /* Set CJK font for Chinese character support */
-#if LV_FONT_SIMSUN_16_CJK
-    lv_obj_set_style_text_font(label_text, &lv_font_simsun_16_cjk, 0);
-    ESP_LOGI(TAG, "Using SimSun 16 CJK font for Chinese support");
-#else
-    ESP_LOGW(TAG, "CJK font not enabled, Chinese characters may not display");
-#endif
+    lv_obj_set_style_text_font(label_text, hal_display_select_text_font("Ready", 24), 0);
 
     /* 9. Initialize animation system */
     if (emoji_anim_init(img_emoji) == 0) {
@@ -764,14 +831,7 @@ int hal_display_ui_init(void) {
     lv_label_set_text(label_text, "Ready");
     lv_obj_set_style_text_color(label_text, lv_color_white(), 0);
     lv_obj_align(label_text, LV_ALIGN_CENTER, 0, -140);
-
-    /* Set CJK font for Chinese character support */
-#if LV_FONT_SIMSUN_16_CJK
-    lv_obj_set_style_text_font(label_text, &lv_font_simsun_16_cjk, 0);
-    ESP_LOGI(TAG, "Using SimSun 16 CJK font for Chinese support");
-#else
-    ESP_LOGW(TAG, "CJK font not enabled, Chinese characters may not display");
-#endif
+    lv_obj_set_style_text_font(label_text, hal_display_select_text_font("Ready", 24), 0);
 
     /* Load the new main screen FIRST - so user sees black screen immediately */
     lv_disp_load_scr(scr);
@@ -861,20 +921,21 @@ int hal_display_set_text_with_style(const char *text, int font_size, bool alert_
 #define MAX_DISPLAY_CHARS 30
     char truncated[MAX_DISPLAY_CHARS + 4];
     int len = strlen(text);
+    bool should_truncate = !hal_display_text_has_non_ascii(text) && len > MAX_DISPLAY_CHARS;
     lv_color_t text_color = alert_text ? lv_palette_main(LV_PALETTE_RED) : lv_color_white();
 
-    if (len > MAX_DISPLAY_CHARS) {
+    if (should_truncate) {
         strncpy(truncated, text, MAX_DISPLAY_CHARS);
         strcpy(truncated + MAX_DISPLAY_CHARS, "...");
         ESP_LOGI(TAG, "Set text (truncated): '%s' -> '%s'", text, truncated);
         lvgl_port_lock(0);
-        lv_obj_set_style_text_color(label_text, text_color, 0);
+        hal_display_apply_text_style_locked(text, font_size, text_color);
         lv_label_set_text(label_text, truncated);
         lvgl_port_unlock();
     } else {
         ESP_LOGI(TAG, "Set text: '%s' (size %d)", text, font_size);
         lvgl_port_lock(0);
-        lv_obj_set_style_text_color(label_text, text_color, 0);
+        hal_display_apply_text_style_locked(text, font_size, text_color);
         lv_label_set_text(label_text, text);
         lvgl_port_unlock();
     }
