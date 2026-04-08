@@ -1,5 +1,25 @@
 # GIF Animation Refactor Plan
 
+This document remains the architecture baseline for the refactor.
+
+For the current validated branch state, day-to-day workflow, and next steps, see
+also:
+
+- `GIF_ANIMATION_BRANCH_GUIDE.md`
+- `GIF_ANIMPACK_TOOLCHAIN.md`
+- `GIF_ANIMATION_ROADMAP.md`
+
+## Current Implementation Status
+
+- GIF-to-`animpack` generation is implemented and in active use.
+- SD-backed boot animation is implemented.
+- Runtime playback now streams `animpack` frames from SD instead of relying on
+  full PNG-sequence hot caches.
+- FATFS long file name support is enabled so the runtime can open
+  `anim_manifest.bin` and `*.animpack`.
+- The UI text overlay and the transient blank-frame / `No data` switch bug have
+  both been fixed on this branch.
+
 ## Summary
 
 - GIF is the source asset format only. The firmware will not decode GIF files at runtime.

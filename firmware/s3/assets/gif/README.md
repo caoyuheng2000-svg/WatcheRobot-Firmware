@@ -18,3 +18,20 @@ Recommended canonical filenames:
 - `custom3.gif`
 
 Legacy names such as `watcher-boot.gif` are still accepted for compatibility.
+
+Typical workflow from `firmware/s3`:
+
+```powershell
+python tools/generate_anim_assets.py
+python tools/sync_anim_sdcard.py --target-root F:\
+```
+
+Generated output is written to:
+
+- `release/v0.1.7/sdcard/anim/`
+
+For the full branch guide and roadmap, see:
+
+- `docs/GIF_ANIMATION_BRANCH_GUIDE.md`
+- `docs/GIF_ANIMPACK_TOOLCHAIN.md`
+- `docs/GIF_ANIMATION_ROADMAP.md`
