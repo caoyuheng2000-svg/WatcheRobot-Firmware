@@ -34,8 +34,9 @@
 #define WS_URL_MAX_LEN 128
 /* The protocol already handles fragmented frames, so a small client buffer is enough and keeps heap pressure down. */
 #define WS_BUFFER_SIZE 2048
-/* Local ws:// transport does not need a large client task stack; oversized stacks starve internal heap for LCD DMA. */
-#define WS_TASK_STACK 4096
+/* Keep the websocket client stack large enough for JSON parsing, routing, and event callbacks
+ * without regressing internal-RAM headroom too far for LCD DMA. */
+#define WS_TASK_STACK 6144
 #define WS_TASK_PRIO 8
 #define WS_SEND_TIMEOUT_MS 5000
 #define WS_RESPONSE_TIMEOUT_MS 30000
