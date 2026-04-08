@@ -12,10 +12,10 @@ from tools.win_flasher.releases import get_repo_root
 class PackageParserTests(unittest.TestCase):
     def test_parse_existing_release_zip(self) -> None:
         repo_root = get_repo_root()
-        package_path = repo_root / "firmware" / "s3" / "release" / "v0.1.7" / "WatcheRobot-S3-v0.1.7-esp32s3.zip"
+        package_path = repo_root / "firmware" / "s3" / "release" / "v0.1.8" / "WatcheRobot-S3-v0.1.8-esp32s3.zip"
         package = parse_flash_package(package_path)
 
-        self.assertEqual(package.version, "v0.1.7")
+        self.assertEqual(package.version, "v0.1.8")
         self.assertEqual(package.chip, "esp32s3")
         self.assertEqual(len(package.segments), 5)
         self.assertEqual(package.segments[0].file_name, "bootloader.bin")

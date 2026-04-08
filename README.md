@@ -22,14 +22,13 @@ WatcheRobot is an open-source AI assistant robot built on the **SenseCAP Watcher
 
 ### Current Release Track
 
-- Current release target: `v0.1.7`
-- `v0.1.7` is the recommended baseline for validating the latest reconnect stability and UI state consistency fixes on the ESP32-S3 mainline:
-  - BLE-to-WebSocket recovery now puts less pressure on runtime memory during reconnect storms
-  - Display text and font changes stay aligned more reliably with behavior-state updates and WebSocket events
-  - UI state transitions are less likely to drift when local state changes and cloud-driven state changes arrive close together
-  - The branch still includes the animation, Bluetooth feedback, cached WebSocket resume, and audio recovery improvements from `v0.1.6`
-- This release is suitable for repeated validation of reconnect stability, state handoff, on-screen text behavior, and mixed local/cloud UI transitions
-- BLE / Wi-Fi, cloud voice, animation, and local expression playback remain integrated on the same mainline, and `v0.1.7` should be treated as the current release package for regression and feature validation
+- Current release target: `v0.1.8`
+- `v0.1.8` keeps the current ESP32-S3 runtime baseline used in `v0.1.7`, while adding a smoother Windows packaged flashing workflow:
+  - Windows release validation can now use `tools\flash-release.cmd` and `tools\win_flasher`
+  - Release ZIP flashing is now documented alongside the existing ESP-IDF source build flow
+  - The packaged firmware baseline still carries the reconnect stability, UI state consistency, Bluetooth feedback, cached WebSocket resume, and audio recovery fixes already present on main
+- This release is suitable for repeated validation of packaged flashing, reconnect stability, state handoff, on-screen text behavior, and mixed local/cloud UI transitions
+- BLE / Wi-Fi, cloud voice, animation, and local expression playback remain integrated on the same mainline, and `v0.1.8` should be treated as the current release package for regression and feature validation
 
 ---
 
