@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(PROJECT_VER "v0.1.9")
+set(PROJECT_VER "v0.2.0")
 
 # Extra component directories (nested structure)
 # ESP-IDF only scans components/ directly, so we need to specify subdirectories
@@ -41,18 +41,34 @@ else()
     set(ANIM_DEFAULT_FPS 10)
 endif()
 
-set(ANIM_IMPORT_DIR ${CMAKE_SOURCE_DIR}/assets/watcher0327png)
+set(ANIM_GIF_DIR ${CMAKE_SOURCE_DIR}/assets/gif)
+set(ANIM_LEGACY_DIR ${CMAKE_SOURCE_DIR}/assets/watcher0327png)
+set(ANIM_IMPORT_DIR ${ANIM_LEGACY_DIR})
+if(EXISTS "${ANIM_GIF_DIR}")
+    file(GLOB_RECURSE ANIM_GIF_SOURCES CONFIGURE_DEPENDS "${ANIM_GIF_DIR}/*.gif")
+    if(ANIM_GIF_SOURCES)
+        set(ANIM_IMPORT_DIR ${ANIM_GIF_DIR})
+    endif()
+endif()
+
+set(ANIM_OUTPUT_DIR ${CMAKE_SOURCE_DIR}/release/${PROJECT_VER}/sdcard/anim)
+set(ANIM_GENERATOR_ARGS
+    --output-dir ${ANIM_OUTPUT_DIR}
+    --input-dir ${ANIM_IMPORT_DIR}
+    --fps ${ANIM_DEFAULT_FPS}
+)
+
+if(DEFINED CONFIG_LV_COLOR_16_SWAP AND CONFIG_LV_COLOR_16_SWAP)
+    list(APPEND ANIM_GENERATOR_ARGS --lv-color-16-swap)
+endif()
 
 add_custom_target(anim_assets_gen
     COMMAND ${project_python} ${CMAKE_SOURCE_DIR}/tools/generate_anim_assets.py
-            --spiffs-dir ${CMAKE_SOURCE_DIR}/spiffs
-            --output-dir ${CMAKE_SOURCE_DIR}/spiffs/anim
-            --import-dir ${ANIM_IMPORT_DIR}
-            --fps ${ANIM_DEFAULT_FPS}
+            ${ANIM_GENERATOR_ARGS}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     BYPRODUCTS
-        ${CMAKE_SOURCE_DIR}/spiffs/anim/anim_manifest.bin
-    COMMENT "Generating animation manifest and raw565 previews")
+        ${ANIM_OUTPUT_DIR}/anim_manifest.bin
+    COMMENT "Generating SD-card animpack assets and manifest")
 
 # Create SPIFFS partition image from spiffs/ directory
 spiffs_create_partition_image(storage spiffs FLASH_IN_PROJECT DEPENDS anim_assets_gen)

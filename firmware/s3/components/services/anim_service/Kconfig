@@ -5,10 +5,16 @@ menu "Watcher Animation Service"
         default 10
         range 1 60
         help
-            Target frame rate for emoji animations.
-            Higher values provide smoother animation but require faster frame decoding.
-            Default 10fps balances smoothness with lower decode pressure and
-            more stable playback on current hardware.
+            Target playback rate for the SD-backed animation streamer.
+            Default 10fps balances smoothness with tighter ring-buffer safety.
+
+    config WATCHER_ANIM_RING_FRAMES
+        int "Animation ring buffer frames"
+        default 3
+        range 2 6
+        help
+            Number of decoded RGB565 frames kept in RAM for the active animation.
+            Three frames is the default streaming baseline.
 
     config WATCHER_ANIM_MAX_FRAMES_PER_TYPE
         int "Maximum frames per animation type"

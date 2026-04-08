@@ -51,6 +51,7 @@ extern const lv_font_t lv_font_montserrat_24;
 
 static lv_obj_t *label_text = NULL;
 static lv_obj_t *img_emoji = NULL;
+static lv_obj_t *text_overlay = NULL;
 static bool minimal_initialized = false;
 static bool is_initialized = false;
 static bool inputs_initialized = false;
@@ -114,11 +115,31 @@ static const lv_font_t *hal_display_select_text_font(const char *text, int font_
 #endif
 }
 
-static void hal_display_apply_text_style_locked(const char *text, int font_size, lv_color_t text_color) {
+static void hal_display_update_text_overlay_visibility_locked(const char *text) {
+    if (text_overlay == NULL) {
+        return;
+    }
+
+    if (text != NULL && text[0] != '\0') {
+        lv_obj_clear_flag(text_overlay, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(text_overlay, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void hal_display_apply_text_style_locked(const char *text, int font_size, bool alert_text) {
     const lv_font_t *font = hal_display_select_text_font(text, font_size);
+    lv_color_t text_color = alert_text ? lv_palette_main(LV_PALETTE_RED) : lv_color_white();
 
     lv_obj_set_style_text_font(label_text, font, 0);
     lv_obj_set_style_text_color(label_text, text_color, 0);
+    if (text_overlay != NULL) {
+        lv_obj_set_style_bg_color(text_overlay, alert_text ? lv_palette_darken(LV_PALETTE_RED, 4) : lv_color_black(),
+                                  0);
+        lv_obj_set_style_bg_opa(text_overlay, LV_OPA_70, 0);
+        lv_obj_set_style_border_color(text_overlay,
+                                      alert_text ? lv_palette_lighten(LV_PALETTE_RED, 1) : lv_color_hex(0x303030), 0);
+    }
 }
 
 static void hal_display_general_i2c_delay(void) {
@@ -285,14 +306,8 @@ static bool hal_display_prepare_general_i2c_bus(void) {
         scl_level = gpio_get_level(BSP_GENERAL_I2C_SCL);
         read_ok = hal_display_general_i2c_read_input_reg(&input_reg);
 
-        ESP_LOGI(TAG,
-                 "General I2C preflight attempt %d/%d: SDA=%d SCL=%d read_ok=%d input_reg=0x%04x",
-                 attempt,
-                 GENERAL_I2C_MAX_PREPARE_ATTEMPTS,
-                 sda_level,
-                 scl_level,
-                 read_ok ? 1 : 0,
-                 (unsigned int)input_reg);
+        ESP_LOGI(TAG, "General I2C preflight attempt %d/%d: SDA=%d SCL=%d read_ok=%d input_reg=0x%04x", attempt,
+                 GENERAL_I2C_MAX_PREPARE_ATTEMPTS, sda_level, scl_level, read_ok ? 1 : 0, (unsigned int)input_reg);
 
         if (read_ok) {
             gpio_reset_pin(BSP_GENERAL_I2C_SDA);
@@ -370,20 +385,20 @@ static int hal_display_anim_type_to_emoji_id(emoji_anim_type_t type) {
 /* Map display_ui emoji_type to unified internal animation types. */
 static emoji_anim_type_t map_emoji_type(int ui_emoji_id) {
     switch (ui_emoji_id) {
-    case 0:                          /* EMOJI_STANDBY */
-        return EMOJI_ANIM_STANDBY;   /* standby */
-    case 1:                          /* EMOJI_HAPPY */
-        return EMOJI_ANIM_HAPPY;     /* happy */
-    case 2:                          /* EMOJI_LISTENING */
-        return EMOJI_ANIM_LISTENING; /* listening */
-    case 3:                          /* EMOJI_THINKING */
-        return EMOJI_ANIM_THINKING;  /* thinking */
-    case 4:                          /* EMOJI_PROCESSING */
+    case 0:                           /* EMOJI_STANDBY */
+        return EMOJI_ANIM_STANDBY;    /* standby */
+    case 1:                           /* EMOJI_HAPPY */
+        return EMOJI_ANIM_HAPPY;      /* happy */
+    case 2:                           /* EMOJI_LISTENING */
+        return EMOJI_ANIM_LISTENING;  /* listening */
+    case 3:                           /* EMOJI_THINKING */
+        return EMOJI_ANIM_THINKING;   /* thinking */
+    case 4:                           /* EMOJI_PROCESSING */
         return EMOJI_ANIM_PROCESSING; /* processing */
-    case 5:                          /* EMOJI_SPEAKING */
-        return EMOJI_ANIM_SPEAKING;  /* speaking */
-    case 6:                          /* EMOJI_ERROR */
-        return EMOJI_ANIM_ERROR;     /* error */
+    case 5:                           /* EMOJI_SPEAKING */
+        return EMOJI_ANIM_SPEAKING;   /* speaking */
+    case 6:                           /* EMOJI_ERROR */
+        return EMOJI_ANIM_ERROR;      /* error */
     case 7:                           /* EMOJI_BLUETOOTH */
         return EMOJI_ANIM_BLUETOOTH;  /* bluetooth */
     case 8:                           /* EMOJI_CUSTOM_1 */
@@ -398,14 +413,47 @@ static emoji_anim_type_t map_emoji_type(int ui_emoji_id) {
 }
 
 static void hal_display_raise_text_overlay_locked(void) {
-    if (label_text != NULL) {
+    if (text_overlay != NULL) {
+        lv_obj_move_foreground(text_overlay);
+    } else if (label_text != NULL) {
         lv_obj_move_foreground(label_text);
     }
 }
 
+static void hal_display_create_text_overlay_locked(lv_obj_t *parent, const char *initial_text) {
+    text_overlay = lv_obj_create(parent);
+    lv_obj_remove_style_all(text_overlay);
+    lv_obj_set_width(text_overlay, 388);
+    lv_obj_set_height(text_overlay, LV_SIZE_CONTENT);
+    lv_obj_clear_flag(text_overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_layout(text_overlay, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(text_overlay, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(text_overlay, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_radius(text_overlay, 18, 0);
+    lv_obj_set_style_pad_left(text_overlay, 16, 0);
+    lv_obj_set_style_pad_right(text_overlay, 16, 0);
+    lv_obj_set_style_pad_top(text_overlay, 12, 0);
+    lv_obj_set_style_pad_bottom(text_overlay, 12, 0);
+    lv_obj_set_style_bg_color(text_overlay, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(text_overlay, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(text_overlay, 1, 0);
+    lv_obj_set_style_border_color(text_overlay, lv_color_hex(0x303030), 0);
+    lv_obj_align(text_overlay, LV_ALIGN_TOP_MID, 0, 18);
+
+    label_text = lv_label_create(text_overlay);
+    lv_obj_set_width(label_text, LV_PCT(100));
+    lv_label_set_long_mode(label_text, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(label_text, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(label_text, initial_text != NULL ? initial_text : "");
+    lv_obj_set_style_text_color(label_text, lv_color_white(), 0);
+    lv_obj_set_style_text_font(label_text, hal_display_select_text_font(initial_text, 24), 0);
+
+    hal_display_update_text_overlay_visibility_locked(initial_text);
+    hal_display_raise_text_overlay_locked();
+}
+
 static size_t hal_display_max_transfer_bytes(void) {
-    size_t max_transfer =
-        DRV_LCD_H_RES * DRV_LCD_V_RES * DRV_LCD_BITS_PER_PIXEL / 8 / CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV;
+    size_t max_transfer = DRV_LCD_H_RES * DRV_LCD_V_RES * DRV_LCD_BITS_PER_PIXEL / 8 / CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV;
     return max_transfer > 0 ? max_transfer : (DRV_LCD_H_RES * DRV_LCD_BITS_PER_PIXEL / 8);
 }
 
@@ -420,10 +468,8 @@ static size_t hal_display_effective_draw_rows(size_t requested_rows) {
 
 static int hal_display_effective_trans_queue_depth(void) {
     if (CONFIG_BSP_LCD_PANEL_SPI_TRANS_Q_DEPTH > WATCHER_LCD_SAFE_TRANS_QUEUE_DEPTH) {
-        ESP_LOGW(TAG,
-                 "Clamping LCD trans queue depth from %d to %d to reduce internal DMA pressure",
-                 CONFIG_BSP_LCD_PANEL_SPI_TRANS_Q_DEPTH,
-                 WATCHER_LCD_SAFE_TRANS_QUEUE_DEPTH);
+        ESP_LOGW(TAG, "Clamping LCD trans queue depth from %d to %d to reduce internal DMA pressure",
+                 CONFIG_BSP_LCD_PANEL_SPI_TRANS_Q_DEPTH, WATCHER_LCD_SAFE_TRANS_QUEUE_DEPTH);
         return WATCHER_LCD_SAFE_TRANS_QUEUE_DEPTH;
     }
     return CONFIG_BSP_LCD_PANEL_SPI_TRANS_Q_DEPTH;
@@ -491,14 +537,16 @@ static esp_err_t hal_display_lcd_panel_init(void) {
         .trans_queue_depth = hal_display_effective_trans_queue_depth(),
         .lcd_cmd_bits = DRV_LCD_CMD_BITS,
         .lcd_param_bits = DRV_LCD_PARAM_BITS,
-        .flags = {
-            .quad_mode = true,
-        },
+        .flags =
+            {
+                .quad_mode = true,
+            },
     };
     spd2010_vendor_config_t vendor_config = {
-        .flags = {
-            .use_qspi_interface = 1,
-        },
+        .flags =
+            {
+                .use_qspi_interface = 1,
+            },
     };
     if (esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)BSP_LCD_SPI_NUM, &io_config, &s_panel_io_handle) != ESP_OK) {
         return ESP_FAIL;
@@ -513,8 +561,7 @@ static esp_err_t hal_display_lcd_panel_init(void) {
     if (esp_lcd_new_panel_spd2010(s_panel_io_handle, &panel_config, &s_panel_handle) != ESP_OK) {
         return ESP_FAIL;
     }
-    if (esp_lcd_panel_reset(s_panel_handle) != ESP_OK ||
-        esp_lcd_panel_init(s_panel_handle) != ESP_OK ||
+    if (esp_lcd_panel_reset(s_panel_handle) != ESP_OK || esp_lcd_panel_init(s_panel_handle) != ESP_OK ||
         esp_lcd_panel_mirror(s_panel_handle, DRV_LCD_MIRROR_X, DRV_LCD_MIRROR_Y) != ESP_OK ||
         esp_lcd_panel_disp_on_off(s_panel_handle, true) != ESP_OK) {
         return ESP_FAIL;
@@ -533,9 +580,7 @@ static lv_disp_t *hal_display_add_lcd_display(void) {
     if (effective_rows != requested_rows) {
         ESP_LOGW(TAG,
                  "Clamping LVGL draw buffer from %u rows to %u rows so each flush fits SPI max_transfer_sz=%u bytes",
-                 (unsigned)requested_rows,
-                 (unsigned)effective_rows,
-                 (unsigned)hal_display_max_transfer_bytes());
+                 (unsigned)requested_rows, (unsigned)effective_rows, (unsigned)hal_display_max_transfer_bytes());
     }
 
     const lvgl_port_display_cfg_t disp_cfg = {
@@ -546,29 +591,27 @@ static lv_disp_t *hal_display_add_lcd_display(void) {
         .hres = DRV_LCD_H_RES,
         .vres = DRV_LCD_V_RES,
         .monochrome = false,
-        .rotation = {
-            .swap_xy = DRV_LCD_SWAP_XY,
-            .mirror_x = DRV_LCD_MIRROR_X,
-            .mirror_y = DRV_LCD_MIRROR_Y,
-        },
-        .flags = {
-            .buff_dma = false,
-            .buff_spiram = true,
+        .rotation =
+            {
+                .swap_xy = DRV_LCD_SWAP_XY,
+                .mirror_x = DRV_LCD_MIRROR_X,
+                .mirror_y = DRV_LCD_MIRROR_Y,
+            },
+        .flags =
+            {
+                .buff_dma = false,
+                .buff_spiram = true,
 #if LVGL_VERSION_MAJOR == 9 && defined(CONFIG_LV_COLOR_16_SWAP)
-            .swap_bytes = true,
+                .swap_bytes = true,
 #endif
-        },
+            },
     };
 
     ESP_LOGI(TAG,
              "LVGL draw buffer: requested=%u rows, effective=%u rows, %lu pixels, double=%d, psram=%d, dma_div=%d, "
              "trans_q=%d",
-             (unsigned)requested_rows,
-             (unsigned)effective_rows,
-             (unsigned long)disp_cfg.buffer_size,
-             disp_cfg.double_buffer,
-             disp_cfg.flags.buff_spiram,
-             CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV,
+             (unsigned)requested_rows, (unsigned)effective_rows, (unsigned long)disp_cfg.buffer_size,
+             disp_cfg.double_buffer, disp_cfg.flags.buff_spiram, CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV,
              hal_display_effective_trans_queue_depth());
 
     s_display = lvgl_port_add_disp(&disp_cfg);
@@ -592,12 +635,13 @@ static lv_indev_t *hal_display_init_knob_input(void) {
         .type = BUTTON_TYPE_CUSTOM,
         .long_press_time = 500,
         .short_press_time = 200,
-        .custom_button_config = {
-            .active_level = 0,
-            .button_custom_init = bsp_knob_btn_init,
-            .button_custom_deinit = bsp_knob_btn_deinit,
-            .button_custom_get_key_value = bsp_knob_btn_get_key_value,
-        },
+        .custom_button_config =
+            {
+                .active_level = 0,
+                .button_custom_init = bsp_knob_btn_init,
+                .button_custom_deinit = bsp_knob_btn_deinit,
+                .button_custom_get_key_value = bsp_knob_btn_get_key_value,
+            },
     };
     const lvgl_port_encoder_cfg_t encoder_cfg = {
         .disp = s_display,
@@ -634,15 +678,17 @@ static lv_indev_t *hal_display_init_touch_input(void) {
         .y_max = DRV_LCD_V_RES,
         .rst_gpio_num = GPIO_NUM_NC,
         .int_gpio_num = GPIO_NUM_NC,
-        .levels = {
-            .reset = 0,
-            .interrupt = 0,
-        },
-        .flags = {
-            .swap_xy = DRV_LCD_SWAP_XY,
-            .mirror_x = DRV_LCD_MIRROR_X,
-            .mirror_y = DRV_LCD_MIRROR_Y,
-        },
+        .levels =
+            {
+                .reset = 0,
+                .interrupt = 0,
+            },
+        .flags =
+            {
+                .swap_xy = DRV_LCD_SWAP_XY,
+                .mirror_x = DRV_LCD_MIRROR_X,
+                .mirror_y = DRV_LCD_MIRROR_Y,
+            },
     };
     const esp_lcd_panel_io_i2c_config_t tp_io_cfg = ESP_LCD_TOUCH_IO_I2C_SPD2010_CONFIG();
     if (esp_lcd_new_panel_io_i2c(BSP_TOUCH_I2C_NUM, &tp_io_cfg, &s_touch_io_handle) != ESP_OK) {
@@ -765,15 +811,8 @@ int hal_display_init(void) {
     img_emoji = lv_img_create(scr);
     lv_obj_align(img_emoji, LV_ALIGN_CENTER, 0, 0);
 
-    /* 7. Create text label AFTER emoji - so it's in foreground */
-    label_text = lv_label_create(scr);
-    lv_obj_set_width(label_text, 380);
-    lv_label_set_long_mode(label_text, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_align(label_text, LV_TEXT_ALIGN_CENTER, 0); /* Center align text */
-    lv_label_set_text(label_text, "Ready");
-    lv_obj_set_style_text_color(label_text, lv_color_white(), 0);
-    lv_obj_align(label_text, LV_ALIGN_CENTER, 0, -140); /* Move higher to avoid emoji overlap */
-    lv_obj_set_style_text_font(label_text, hal_display_select_text_font("Ready", 24), 0);
+    /* 7. Create text overlay AFTER emoji - so it stays in foreground */
+    hal_display_create_text_overlay_locked(scr, "Ready");
 
     /* 9. Initialize animation system */
     if (emoji_anim_init(img_emoji) == 0) {
@@ -823,15 +862,8 @@ int hal_display_ui_init(void) {
     img_emoji = lv_img_create(scr);
     lv_obj_align(img_emoji, LV_ALIGN_CENTER, 0, 0);
 
-    /* 5. Create text label AFTER emoji - so it's in foreground */
-    label_text = lv_label_create(scr);
-    lv_obj_set_width(label_text, 380);
-    lv_label_set_long_mode(label_text, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_align(label_text, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(label_text, "Ready");
-    lv_obj_set_style_text_color(label_text, lv_color_white(), 0);
-    lv_obj_align(label_text, LV_ALIGN_CENTER, 0, -140);
-    lv_obj_set_style_text_font(label_text, hal_display_select_text_font("Ready", 24), 0);
+    /* 5. Create text overlay AFTER emoji - so it's in foreground */
+    hal_display_create_text_overlay_locked(scr, "Ready");
 
     /* Load the new main screen FIRST - so user sees black screen immediately */
     lv_disp_load_scr(scr);
@@ -869,8 +901,7 @@ int hal_display_input_init(void) {
     bool button_ready;
 
     if (inputs_initialized) {
-        ESP_LOGI(TAG, "Delayed display inputs already initialized (knob=%d touch=%d)",
-                 s_knob_indev != NULL ? 1 : 0,
+        ESP_LOGI(TAG, "Delayed display inputs already initialized (knob=%d touch=%d)", s_knob_indev != NULL ? 1 : 0,
                  s_touch_indev != NULL ? 1 : 0);
         return 0;
     }
@@ -897,10 +928,8 @@ int hal_display_input_init(void) {
     }
 
     inputs_initialized = (s_knob_indev != NULL) || (s_touch_indev != NULL);
-    ESP_LOGI(TAG, "Delayed display inputs ready: knob=%d touch=%d any=%d",
-             s_knob_indev != NULL ? 1 : 0,
-             s_touch_indev != NULL ? 1 : 0,
-             inputs_initialized ? 1 : 0);
+    ESP_LOGI(TAG, "Delayed display inputs ready: knob=%d touch=%d any=%d", s_knob_indev != NULL ? 1 : 0,
+             s_touch_indev != NULL ? 1 : 0, inputs_initialized ? 1 : 0);
     return inputs_initialized ? 0 : -1;
 }
 
@@ -922,21 +951,23 @@ int hal_display_set_text_with_style(const char *text, int font_size, bool alert_
     char truncated[MAX_DISPLAY_CHARS + 4];
     int len = strlen(text);
     bool should_truncate = !hal_display_text_has_non_ascii(text) && len > MAX_DISPLAY_CHARS;
-    lv_color_t text_color = alert_text ? lv_palette_main(LV_PALETTE_RED) : lv_color_white();
-
     if (should_truncate) {
         strncpy(truncated, text, MAX_DISPLAY_CHARS);
         strcpy(truncated + MAX_DISPLAY_CHARS, "...");
         ESP_LOGI(TAG, "Set text (truncated): '%s' -> '%s'", text, truncated);
         lvgl_port_lock(0);
-        hal_display_apply_text_style_locked(text, font_size, text_color);
+        hal_display_apply_text_style_locked(text, font_size, alert_text);
         lv_label_set_text(label_text, truncated);
+        hal_display_update_text_overlay_visibility_locked(truncated);
+        hal_display_raise_text_overlay_locked();
         lvgl_port_unlock();
     } else {
         ESP_LOGI(TAG, "Set text: '%s' (size %d)", text, font_size);
         lvgl_port_lock(0);
-        hal_display_apply_text_style_locked(text, font_size, text_color);
+        hal_display_apply_text_style_locked(text, font_size, alert_text);
         lv_label_set_text(label_text, text);
+        hal_display_update_text_overlay_visibility_locked(text);
+        hal_display_raise_text_overlay_locked();
         lvgl_port_unlock();
     }
 
@@ -959,6 +990,7 @@ int hal_display_set_emoji(int emoji_id) {
     /* emoji_anim_start calls LVGL APIs - must hold lock */
     lvgl_port_lock(0);
     int ret = emoji_anim_start(type);
+    hal_display_raise_text_overlay_locked();
     lvgl_port_unlock();
     if (ret != 0) {
         ESP_LOGW(TAG, "Failed to start animation for emoji ID: %d", emoji_id);
@@ -970,10 +1002,8 @@ int hal_display_set_emoji(int emoji_id) {
     if (!emoji_anim_is_switch_pending() && displayed_type == type) {
         ESP_LOGI(TAG, "Set emoji request: %s -> %s animation applied", emoji_name, emoji_type_name(type));
     } else {
-        ESP_LOGI(TAG,
-                 "Set emoji request: %s -> %s animation accepted, async preparation in progress (active=%s)",
-                 emoji_name,
-                 emoji_type_name(type),
+        ESP_LOGI(TAG, "Set emoji request: %s -> %s animation accepted, async preparation in progress (active=%s)",
+                 emoji_name, emoji_type_name(type),
                  displayed_type == EMOJI_ANIM_NONE ? "none" : emoji_type_name(displayed_type));
     }
     return 0;
@@ -995,6 +1025,7 @@ int hal_display_start_speaking(void) {
         return -1;
     lvgl_port_lock(0);
     int ret = emoji_anim_start(EMOJI_ANIM_SPEAKING);
+    hal_display_raise_text_overlay_locked();
     lvgl_port_unlock();
     return ret;
 }
@@ -1004,6 +1035,7 @@ int hal_display_start_listening(void) {
         return -1;
     lvgl_port_lock(0);
     int ret = emoji_anim_start(EMOJI_ANIM_LISTENING);
+    hal_display_raise_text_overlay_locked();
     lvgl_port_unlock();
     return ret;
 }
@@ -1013,6 +1045,7 @@ int hal_display_start_analyzing(void) {
         return -1;
     lvgl_port_lock(0);
     int ret = emoji_anim_start(EMOJI_ANIM_PROCESSING);
+    hal_display_raise_text_overlay_locked();
     lvgl_port_unlock();
     return ret;
 }
@@ -1022,6 +1055,7 @@ int hal_display_stop_animation(void) {
         return -1;
     lvgl_port_lock(0);
     int ret = emoji_anim_start(EMOJI_ANIM_STANDBY);
+    hal_display_raise_text_overlay_locked();
     lvgl_port_unlock();
     return ret;
 }

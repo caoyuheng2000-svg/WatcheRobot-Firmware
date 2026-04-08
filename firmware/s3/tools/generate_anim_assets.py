@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """
-Generate anim_manifest.bin and first-frame raw565 previews from PNG assets.
+Generate SD-card animation assets from a folder of GIF sources or legacy PNG sequences.
 
-Requires Pillow:
-    python -m pip install Pillow
+Outputs:
+  - anim_manifest.bin (v2)
+  - one <type>.animpack per animation
+
+The firmware runtime treats GIF as an offline authoring format only. At build
+time we expand each frame into a self-contained RGB565 payload that can be
+streamed directly into a ring buffer on-device.
 """
 
 from __future__ import annotations
@@ -17,8 +22,16 @@ from pathlib import Path
 
 try:
     from PIL import Image
+    from PIL import ImageSequence
 except ImportError as exc:  # pragma: no cover - runtime dependency check
     raise SystemExit("Pillow is required. Install it with: python -m pip install Pillow") from exc
+
+
+PROJECT_VERSION = "v0.2.0"
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+DEFAULT_INPUT_DIR = PROJECT_ROOT / "assets" / "gif"
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "release" / PROJECT_VERSION / "sdcard" / "anim"
 
 
 ANIM_TYPES = [
@@ -36,12 +49,18 @@ ANIM_TYPES = [
     "custom3",
 ]
 
-MAX_FRAMES = 24
-PATH_LEN = 96
 NAME_LEN = 24
-MANIFEST_MAGIC = 0x4D494E41
-MANIFEST_VERSION = 1
-IMPORT_MAP = {
+PATH_LEN = 96
+MANIFEST_MAGIC = b"ANIM"
+MANIFEST_VERSION = 2
+PACK_MAGIC = b"ANPK"
+PACK_VERSION = 2
+FRAME_DESC_FMT = "<IIHH"
+FRAME_DESC_SIZE = struct.calcsize(FRAME_DESC_FMT)
+MANIFEST_ENTRY_FMT = f"<HHHHHB3x{NAME_LEN}s{PATH_LEN}s"
+PACK_HEADER_FMT = "<4sHHHHBBHIII"
+
+LEGACY_IMPORT_MAP = {
     "watcher-boot": "boot",
     "watcher-error": "error",
     "watcher-happy": "happy",
@@ -57,11 +76,20 @@ IMPORT_MAP = {
     "watcher-thinking": "thinking",
 }
 
-
-def frame_filename(prefix: str, index: int) -> str:
-    if prefix == "bluetooth" or prefix.startswith("custom"):
-        return f"{prefix}_{index:03d}.png"
-    return f"{prefix}{index}.png"
+GIF_CANDIDATES = {
+    "boot": ["boot.gif", "watcher-boot.gif"],
+    "happy": ["happy.gif", "watcher-happy.gif"],
+    "error": ["error.gif", "watcher-error.gif"],
+    "bluetooth": ["bluetooth.gif", "watcher-bluetooth.gif"],
+    "speaking": ["speaking.gif", "watcher-speaking.gif"],
+    "listening": ["listening.gif", "watcher-listening.gif"],
+    "processing": ["processing.gif", "watcher-processing.gif"],
+    "standby": ["standby.gif", "watcher-standby.gif"],
+    "thinking": ["thinking.gif", "watcher-thinking.gif"],
+    "custom1": ["custom1.gif", "watcher-custom1.gif"],
+    "custom2": ["custom2.gif", "watcher-custom2.gif"],
+    "custom3": ["custom3.gif", "watcher-custom3.gif", "watcher-processing2.gif"],
+}
 
 
 def encode_c_string(value: str, size: int) -> bytes:
@@ -71,19 +99,6 @@ def encode_c_string(value: str, size: int) -> bytes:
     return data + b"\0" * (size - len(data))
 
 
-def rgba_to_rgb565(image: Image.Image) -> bytes:
-    rgba = image.convert("RGBA")
-    payload = bytearray()
-    for r, g, b, a in rgba.getdata():
-        if a != 255:
-            r = (r * a) // 255
-            g = (g * a) // 255
-            b = (b * a) // 255
-        value = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
-        payload += struct.pack("<H", value)
-    return bytes(payload)
-
-
 def extract_frame_index(stem: str) -> int:
     matches = re.findall(r"(\d+)", stem)
     if not matches:
@@ -91,140 +106,217 @@ def extract_frame_index(stem: str) -> int:
     return int(matches[-1])
 
 
-def parse_frame_index(name: str, prefix: str) -> int | None:
-    match = re.fullmatch(rf"{re.escape(prefix)}(?:[_-]?)(\d+)\.png", name, re.IGNORECASE)
-    if match is None:
+def rgba_to_rgb565(image: Image.Image, swap_bytes: bool) -> bytes:
+    rgba = image.convert("RGBA")
+    payload = bytearray()
+    rgba_bytes = rgba.tobytes()
+    for offset in range(0, len(rgba_bytes), 4):
+        r = rgba_bytes[offset]
+        g = rgba_bytes[offset + 1]
+        b = rgba_bytes[offset + 2]
+        a = rgba_bytes[offset + 3]
+        if a != 255:
+            r = (r * a) // 255
+            g = (g * a) // 255
+            b = (b * a) // 255
+        value = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+        payload += struct.pack(">H" if swap_bytes else "<H", value)
+    return bytes(payload)
+
+
+def load_gif_frames(path: Path, default_delay_ms: int) -> list[tuple[Image.Image, int]]:
+    frames: list[tuple[Image.Image, int]] = []
+    with Image.open(path) as image:
+        fallback_delay = image.info.get("duration", default_delay_ms) or default_delay_ms
+        for frame in ImageSequence.Iterator(image):
+            delay_ms = frame.info.get("duration", fallback_delay) or default_delay_ms
+            if delay_ms <= 0:
+                delay_ms = default_delay_ms
+            frames.append((frame.convert("RGBA").copy(), int(delay_ms)))
+    return frames
+
+
+def load_legacy_png_frames(path: Path, default_delay_ms: int) -> list[tuple[Image.Image, int]]:
+    source_frames = sorted(path.glob("*.png"), key=lambda candidate: extract_frame_index(candidate.stem))
+    frames: list[tuple[Image.Image, int]] = []
+    for frame in source_frames:
+        with Image.open(frame) as image:
+            frames.append((image.convert("RGBA").copy(), default_delay_ms))
+    return frames
+
+
+def resolve_gif_source(import_dir: Path, anim_type: str) -> Path | None:
+    candidate_names = GIF_CANDIDATES.get(anim_type, [])
+    alias_stems = {anim_type.lower()}
+    alias_stems.update(Path(candidate_name).stem.lower() for candidate_name in candidate_names)
+
+    for candidate_name in candidate_names:
+        candidate = import_dir / candidate_name
+        if candidate.is_file():
+            return candidate
+
+    matches = [candidate for candidate in import_dir.rglob("*.gif") if candidate.stem.lower() in alias_stems]
+    if not matches:
         return None
-    return int(match.group(1))
+
+    matches.sort(key=lambda path: str(path.relative_to(import_dir)).lower())
+    return matches[0]
 
 
-def iter_frame_paths(spiffs_dir: Path, prefix: str) -> list[Path]:
-    matches: list[tuple[int, Path]] = []
-    for path in spiffs_dir.glob("*.png"):
-        frame_index = parse_frame_index(path.name, prefix)
-        if frame_index is None:
-            continue
-        matches.append((frame_index, path))
-    matches.sort(key=lambda item: item[0])
-    return [path for _, path in matches]
+def load_source_frames(import_dir: Path, anim_type: str, default_delay_ms: int) -> list[tuple[Image.Image, int]]:
+    gif_source = resolve_gif_source(import_dir, anim_type)
+    if gif_source is not None:
+        return load_gif_frames(gif_source, default_delay_ms)
+
+    legacy_dirs = [name for name, mapped_type in LEGACY_IMPORT_MAP.items() if mapped_type == anim_type]
+    for legacy_dir in legacy_dirs:
+        candidate = import_dir / legacy_dir
+        if candidate.is_dir():
+            frames = load_legacy_png_frames(candidate, default_delay_ms)
+            if frames:
+                return frames
+
+    return []
 
 
-def discover_frames(spiffs_dir: Path, prefix: str) -> list[Path]:
-    return iter_frame_paths(spiffs_dir, prefix)[:MAX_FRAMES]
+def write_animpack(
+    output_dir: Path,
+    anim_type: str,
+    frames: list[tuple[Image.Image, int]],
+    default_fps: int,
+    swap_bytes: bool,
+) -> dict[str, int | str]:
+    width, height = frames[0][0].size
+    payloads = [rgba_to_rgb565(frame, swap_bytes) for frame, _ in frames]
+    frame_data_size = len(payloads[0])
+    if any(len(payload) != frame_data_size for payload in payloads):
+        raise ValueError(f"Frame size mismatch in {anim_type}")
+
+    pack_name = f"{anim_type}.animpack"
+    pack_path = output_dir / pack_name
+    toc_offset = struct.calcsize(PACK_HEADER_FMT)
+    payload_offset = toc_offset + len(frames) * FRAME_DESC_SIZE
+    default_delay_ms = max(1, int(round(1000 / max(default_fps, 1))))
+
+    descriptors = []
+    payload_offset_cursor = 0
+    for payload, (_, delay_ms) in zip(payloads, frames):
+        descriptors.append(struct.pack(FRAME_DESC_FMT, payload_offset_cursor, len(payload), delay_ms, 0))
+        payload_offset_cursor += len(payload)
+
+    header = struct.pack(
+        PACK_HEADER_FMT,
+        PACK_MAGIC,
+        PACK_VERSION,
+        width,
+        height,
+        len(frames),
+        1,
+        0,
+        default_delay_ms,
+        toc_offset,
+        payload_offset,
+        frame_data_size,
+    )
+
+    with pack_path.open("wb") as handle:
+        handle.write(header)
+        for descriptor in descriptors:
+            handle.write(descriptor)
+        for payload in payloads:
+            handle.write(payload)
+
+    return {
+        "pack_name": pack_name,
+        "width": width,
+        "height": height,
+        "frame_count": len(frames),
+        "fps": default_fps,
+    }
 
 
-def import_external_assets(source_dir: Path, spiffs_dir: Path) -> dict[str, int]:
-    imported: dict[str, int] = {}
-
-    for source_name, target_name in IMPORT_MAP.items():
-        if target_name in imported:
-            continue
-
-        source_anim_dir = source_dir / source_name
-        if not source_anim_dir.is_dir():
-            print(f"Skipping missing source animation directory: {source_anim_dir}", file=sys.stderr)
-            continue
-
-        source_frames = sorted(source_anim_dir.glob("*.png"), key=lambda path: extract_frame_index(path.stem))
-        if not source_frames:
-            print(f"Skipping empty source animation directory: {source_anim_dir}", file=sys.stderr)
-            continue
-
-        if len(source_frames) > MAX_FRAMES:
-            print(
-                f"Warning: {source_name} has {len(source_frames)} frames, truncating to {MAX_FRAMES}",
-                file=sys.stderr,
-            )
-            source_frames = source_frames[:MAX_FRAMES]
-
-        for stale_frame in iter_frame_paths(spiffs_dir, target_name):
-            stale_frame.unlink()
-
-        for index, frame in enumerate(source_frames, start=1):
-            target_path = spiffs_dir / frame_filename(target_name, index)
-            shutil.copy2(frame, target_path)
-
-        imported[target_name] = len(source_frames)
-
-    return imported
-
-
-def build_manifest(spiffs_dir: Path, output_dir: Path, default_fps: int) -> dict[str, int]:
+def build_manifest(
+    import_dir: Path,
+    output_dir: Path,
+    default_fps: int,
+    swap_bytes: bool,
+    clean: bool,
+) -> dict[str, int]:
+    if clean and output_dir.exists():
+        shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    entries = []
-    manifest_counts: dict[str, int] = {}
+    default_delay_ms = max(1, int(round(1000 / max(default_fps, 1))))
 
-    for type_id, name in enumerate(ANIM_TYPES):
-        frames = discover_frames(spiffs_dir, name)
+    manifest_entries = []
+    manifest_counts: dict[str, int] = {}
+    for type_id, anim_type in enumerate(ANIM_TYPES):
+        frames = load_source_frames(import_dir, anim_type, default_delay_ms)
         if not frames:
             continue
 
-        with Image.open(frames[0]) as first_img:
-            width, height = first_img.size
-            raw565 = rgba_to_rgb565(first_img)
-
-        raw_name = f"{name}_first.raw565"
-        raw_path = output_dir / raw_name
-        raw_path.write_bytes(raw565)
-
-        frame_paths = []
-        for frame in frames:
-            frame_paths.append(frame.relative_to(spiffs_dir).as_posix())
-        while len(frame_paths) < MAX_FRAMES:
-            frame_paths.append("")
-
+        pack_info = write_animpack(output_dir, anim_type, frames, default_fps, swap_bytes)
         entry = struct.pack(
-            f"<HHHHHB3x{NAME_LEN}s{PATH_LEN}s",
+            MANIFEST_ENTRY_FMT,
             type_id,
-            width,
-            height,
-            default_fps,
-            len(frames),
+            pack_info["width"],
+            pack_info["height"],
+            pack_info["fps"],
+            pack_info["frame_count"],
             1,
-            encode_c_string(name, NAME_LEN),
-            encode_c_string(f"anim/{raw_name}", PATH_LEN),
+            encode_c_string(anim_type, NAME_LEN),
+            encode_c_string(str(pack_info["pack_name"]), PATH_LEN),
         )
-        entry += b"".join(encode_c_string(path, PATH_LEN) for path in frame_paths)
-        entries.append(entry)
-        manifest_counts[name] = len(frames)
+        manifest_entries.append(entry)
+        manifest_counts[anim_type] = int(pack_info["frame_count"])
 
     manifest_path = output_dir / "anim_manifest.bin"
     manifest_path.write_bytes(
-        struct.pack("<IHH", MANIFEST_MAGIC, MANIFEST_VERSION, len(entries)) + b"".join(entries)
+        struct.pack("<4sHH", MANIFEST_MAGIC, MANIFEST_VERSION, len(manifest_entries)) + b"".join(manifest_entries)
     )
 
     print(f"Wrote {manifest_path}")
-    print(f"Generated {len(entries)} manifest entries in {output_dir}")
-    for name in ANIM_TYPES:
-        if name in manifest_counts:
-            print(f"  {name}: {manifest_counts[name]} frame(s)")
+    print(f"Generated {len(manifest_entries)} manifest entries in {output_dir}")
+    for anim_type in ANIM_TYPES:
+        if anim_type in manifest_counts:
+            print(f"  {anim_type}: {manifest_counts[anim_type]} frame(s)")
     return manifest_counts
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--spiffs-dir", default="spiffs", help="Path to the SPIFFS asset directory")
-    parser.add_argument("--output-dir", default="spiffs/anim", help="Where generated assets should be written")
-    parser.add_argument("--import-dir", help="Optional external animation directory to import before manifest generation")
+    parser.add_argument(
+        "--input-dir",
+        "--import-dir",
+        dest="input_dir",
+        default=str(DEFAULT_INPUT_DIR),
+        help="Directory containing GIF sources or legacy PNG animation folders",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=str(DEFAULT_OUTPUT_DIR),
+        help="Where generated animpack assets should be written",
+    )
     parser.add_argument("--fps", type=int, default=10, help="Default FPS stored in manifest entries")
+    parser.add_argument(
+        "--clean",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Remove the output directory contents before generating new assets",
+    )
+    parser.add_argument(
+        "--lv-color-16-swap",
+        action="store_true",
+        help="Write RGB565 payloads in LVGL-native swapped 16-bit byte order",
+    )
     args = parser.parse_args()
 
-    spiffs_dir = Path(args.spiffs_dir).resolve()
+    import_dir = Path(args.input_dir).resolve()
     output_dir = Path(args.output_dir).resolve()
-    if not spiffs_dir.is_dir():
-        raise SystemExit(f"SPIFFS directory does not exist: {spiffs_dir}")
 
-    if args.import_dir:
-        import_dir = Path(args.import_dir).resolve()
-        if not import_dir.is_dir():
-            raise SystemExit(f"Import directory does not exist: {import_dir}")
-        imported = import_external_assets(import_dir, spiffs_dir)
-        print(f"Imported animation assets from {import_dir}")
-        for name in dict.fromkeys(IMPORT_MAP.values()):
-            if name in imported:
-                print(f"  {name}: {imported[name]} frame(s) imported")
+    if not import_dir.is_dir():
+        raise SystemExit(f"Import directory does not exist: {import_dir}")
 
-    build_manifest(spiffs_dir, output_dir, args.fps)
+    build_manifest(import_dir, output_dir, args.fps, args.lv_color_16_swap, args.clean)
     return 0
 
 

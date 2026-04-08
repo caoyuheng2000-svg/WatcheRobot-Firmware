@@ -22,13 +22,16 @@ WatcheRobot is an open-source AI assistant robot built on the **SenseCAP Watcher
 
 ### Current Release Track
 
-- Current release target: `v0.1.8`
-- `v0.1.8` keeps the current ESP32-S3 runtime baseline used in `v0.1.7`, while adding a smoother Windows packaged flashing workflow:
-  - Windows release validation can now use `tools\flash-release.cmd` and `tools\win_flasher`
-  - Release ZIP flashing is now documented alongside the existing ESP-IDF source build flow
-  - The packaged firmware baseline still carries the reconnect stability, UI state consistency, Bluetooth feedback, cached WebSocket resume, and audio recovery fixes already present on main
-- This release is suitable for repeated validation of packaged flashing, reconnect stability, state handoff, on-screen text behavior, and mixed local/cloud UI transitions
-- BLE / Wi-Fi, cloud voice, animation, and local expression playback remain integrated on the same mainline, and `v0.1.8` should be treated as the current release package for regression and feature validation
+- Current release target: `v0.2.0`
+- `v0.2.0` is the recommended baseline for the GIF-authored animation system on the ESP32-S3 mainline:
+  - PNG-sequence runtime playback has been replaced by SD-backed `animpack` streaming generated from GIF source assets
+  - Boot animation now runs from `/sdcard/anim/boot.animpack`, and missing SD animation resources fail into a deterministic boot error path
+  - UI text remains visible above animated backgrounds, and runtime GIF switches no longer flash white or show `No data`
+  - The branch still carries the reconnect hardening, Bluetooth feedback, cached WebSocket resume, audio recovery work from `v0.1.7`, and the packaged Windows flashing workflow added on main in `v0.1.8`
+- This release is suitable for repeated validation of SD-backed animation startup, on-screen text behavior, runtime state switching, and mixed local/cloud UI transitions
+- The current packaged GIF resource set includes 10 generated animation types; `custom1` and `custom2` are not included yet because their source GIFs are not present
+- Release deliverables now include both a firmware flash bundle and an SD-card animation asset bundle under `firmware/s3/release/v0.2.0`
+- Windows release ZIP flashing remains available through `tools\flash-release.cmd` and `tools\win_flasher` for packaged validation workflows
 
 ---
 

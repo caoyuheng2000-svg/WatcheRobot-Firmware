@@ -14,7 +14,7 @@
 #define TAG "ANIM_META"
 
 /* Metadata file path */
-#define ANIM_META_PATH "/spiffs/anim/anim_meta.json"
+#define ANIM_META_PATH "/sdcard/anim/anim_meta.json"
 
 /* Default values */
 #ifdef CONFIG_WATCHER_ANIM_FPS
@@ -30,18 +30,8 @@ static bool g_meta_loaded = false;
 
 /* Animation type names for JSON parsing */
 static const char *anim_type_names[EMOJI_ANIM_COUNT] = {
-    "boot",
-    "happy",
-    "error",
-    "bluetooth",
-    "speaking",
-    "listening",
-    "processing",
-    "standby",
-    "thinking",
-    "custom1",
-    "custom2",
-    "custom3",
+    "boot",       "happy",   "error",    "bluetooth", "speaking", "listening",
+    "processing", "standby", "thinking", "custom1",   "custom2",  "custom3",
 };
 
 static void set_defaults(void) {

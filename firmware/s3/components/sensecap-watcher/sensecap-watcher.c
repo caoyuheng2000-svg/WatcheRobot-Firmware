@@ -4,8 +4,13 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+#include "diskio_impl.h"
+#include "diskio_sdmmc.h"
+#include "driver/sdspi_host.h"
 #include "esp_lvgl_port.h"
+#include "ff.h"
 #include "iot_button.h"
+#include "sdmmc_common.h"
 #include "sensecap-watcher.h"
 
 static const char *TAG = "BSP";
@@ -27,6 +32,9 @@ static esp_lcd_panel_io_handle_t tp_io_handle = NULL;
 static esp_lcd_touch_handle_t tp_handle = NULL;
 
 static sdmmc_card_t *card;
+static FATFS *sdcard_fs = NULL;
+static BYTE sdcard_pdrv = FF_DRV_NOT_USED;
+static char *sdcard_base_path = NULL;
 static esp_codec_dev_handle_t play_dev_handle;
 static esp_codec_dev_handle_t record_dev_handle;
 static SemaphoreHandle_t codec_mutex = NULL;
@@ -34,6 +42,199 @@ static SemaphoreHandle_t codec_mutex = NULL;
 static i2s_chan_handle_t i2s_tx_chan = NULL;
 static i2s_chan_handle_t i2s_rx_chan = NULL;
 static const audio_codec_data_if_t *i2s_data_if = NULL;
+
+#define WATCHER_SDMMC_INIT_STEP(target_card, condition, function)                                                      \
+    do {                                                                                                               \
+        if ((condition)) {                                                                                             \
+            esp_err_t step_err = (function)(target_card);                                                              \
+            if (step_err != ESP_OK) {                                                                                  \
+                ESP_LOGD(TAG, "%s: %s returned 0x%x", __func__, #function, step_err);                                  \
+                return step_err;                                                                                       \
+            }                                                                                                          \
+        }                                                                                                              \
+    } while (0)
+
+static esp_err_t watcher_sdmmc_card_init_allow_missing_spi_crc(const sdmmc_host_t *config, sdmmc_card_t *out_card) {
+    memset(out_card, 0, sizeof(*out_card));
+    memcpy(&out_card->host, config, sizeof(*config));
+
+    const bool is_spi = host_is_spi(out_card);
+    const bool always = true;
+    const bool io_supported = true;
+
+    WATCHER_SDMMC_INIT_STEP(out_card, !is_spi, sdmmc_fix_host_flags);
+    WATCHER_SDMMC_INIT_STEP(out_card, io_supported, sdmmc_io_reset);
+    WATCHER_SDMMC_INIT_STEP(out_card, always, sdmmc_send_cmd_go_idle_state);
+    WATCHER_SDMMC_INIT_STEP(out_card, always, sdmmc_init_sd_if_cond);
+    WATCHER_SDMMC_INIT_STEP(out_card, io_supported, sdmmc_init_io);
+
+    const bool is_mem = out_card->is_mem;
+    const bool is_sdio = !is_mem;
+
+    if (is_spi) {
+        esp_err_t crc_err = sdmmc_init_spi_crc(out_card);
+        if (crc_err == ESP_ERR_NOT_SUPPORTED) {
+            ESP_LOGW(TAG, "SD card rejected CMD59 CRC_ON_OFF in SPI mode; continuing without data CRC");
+        } else if (crc_err != ESP_OK) {
+            ESP_LOGD(TAG, "%s: sdmmc_init_spi_crc returned 0x%x", __func__, crc_err);
+            return crc_err;
+        }
+    }
+
+    WATCHER_SDMMC_INIT_STEP(out_card, is_mem, sdmmc_init_ocr);
+
+    const bool is_mmc = is_mem && out_card->is_mmc;
+    const bool is_sdmem = is_mem && !is_mmc;
+
+    ESP_LOGD(TAG, "%s: card type is %s", __func__, is_sdio ? "SDIO" : is_mmc ? "MMC" : "SD");
+
+    WATCHER_SDMMC_INIT_STEP(out_card, is_mem, sdmmc_init_cid);
+    WATCHER_SDMMC_INIT_STEP(out_card, !is_spi, sdmmc_init_rca);
+    WATCHER_SDMMC_INIT_STEP(out_card, is_mem, sdmmc_init_csd);
+    WATCHER_SDMMC_INIT_STEP(out_card, is_mmc && !is_spi, sdmmc_init_mmc_decode_cid);
+    WATCHER_SDMMC_INIT_STEP(out_card, !is_spi, sdmmc_init_select_card);
+    WATCHER_SDMMC_INIT_STEP(out_card, is_sdmem, sdmmc_init_sd_blocklen);
+    WATCHER_SDMMC_INIT_STEP(out_card, is_sdmem, sdmmc_init_sd_scr);
+    WATCHER_SDMMC_INIT_STEP(out_card, is_sdmem, sdmmc_init_sd_wait_data_ready);
+    WATCHER_SDMMC_INIT_STEP(out_card, is_mmc, sdmmc_init_mmc_read_ext_csd);
+    WATCHER_SDMMC_INIT_STEP(out_card, always, sdmmc_init_card_hs_mode);
+
+    if (!is_spi) {
+        WATCHER_SDMMC_INIT_STEP(out_card, is_sdmem, sdmmc_init_sd_bus_width);
+        WATCHER_SDMMC_INIT_STEP(out_card, is_sdio, sdmmc_init_io_bus_width);
+        WATCHER_SDMMC_INIT_STEP(out_card, is_mmc, sdmmc_init_mmc_bus_width);
+        WATCHER_SDMMC_INIT_STEP(out_card, always, sdmmc_init_host_bus_width);
+    }
+
+    WATCHER_SDMMC_INIT_STEP(out_card, is_sdmem, sdmmc_init_sd_ssr);
+    WATCHER_SDMMC_INIT_STEP(out_card, always, sdmmc_init_host_frequency);
+    WATCHER_SDMMC_INIT_STEP(out_card, is_sdmem, sdmmc_check_scr);
+    WATCHER_SDMMC_INIT_STEP(out_card, is_mmc, sdmmc_init_mmc_check_ext_csd);
+    return ESP_OK;
+}
+
+static esp_err_t watcher_sdspi_mount_without_crc_cmd(const char *base_path, const sdspi_device_config_t *slot_config,
+                                                     const esp_vfs_fat_mount_config_t *mount_config,
+                                                     sdmmc_card_t **out_card) {
+    esp_err_t err;
+    BYTE pdrv = FF_DRV_NOT_USED;
+    sdmmc_card_t *new_card = NULL;
+    FATFS *fs = NULL;
+    char *dup_path = NULL;
+    char drv[3] = {'?', ':', '\0'};
+    int card_handle = -1;
+    bool diskio_registered = false;
+    bool vfs_registered = false;
+    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+
+    if (ff_diskio_get_drive(&pdrv) != ESP_OK || pdrv == FF_DRV_NOT_USED) {
+        return ESP_ERR_NO_MEM;
+    }
+    drv[0] = (char)('0' + pdrv);
+
+    new_card = calloc(1, sizeof(*new_card));
+    if (new_card == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    dup_path = strdup(base_path);
+    if (dup_path == NULL) {
+        err = ESP_ERR_NO_MEM;
+        goto fail;
+    }
+
+    err = host.init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize SDSPI host: %s", esp_err_to_name(err));
+        goto fail;
+    }
+
+    err = sdspi_host_init_device(slot_config, &card_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to attach SD card to SPI bus: %s", esp_err_to_name(err));
+        goto fail;
+    }
+    host.slot = card_handle;
+
+    err = watcher_sdmmc_card_init_allow_missing_spi_crc(&host, new_card);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Custom SDSPI card init failed: %s", esp_err_to_name(err));
+        goto fail;
+    }
+
+    ff_diskio_register_sdmmc(pdrv, new_card);
+    ff_sdmmc_set_disk_status_check(pdrv, mount_config->disk_status_check_enable);
+    diskio_registered = true;
+
+    err = esp_vfs_fat_register(base_path, drv, mount_config->max_files, &fs);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register FAT VFS at %s: %s", base_path, esp_err_to_name(err));
+        goto fail;
+    }
+    vfs_registered = true;
+
+    FRESULT res = f_mount(fs, drv, 1);
+    if (res != FR_OK) {
+        ESP_LOGW(TAG, "Failed to mount SD card filesystem (%d)", res);
+        err = (mount_config->format_if_mount_failed && res == FR_NO_FILESYSTEM) ? ESP_ERR_NOT_SUPPORTED : ESP_FAIL;
+        goto fail;
+    }
+
+    sdcard_fs = fs;
+    sdcard_pdrv = pdrv;
+    sdcard_base_path = dup_path;
+    card = new_card;
+
+    if (out_card != NULL) {
+        *out_card = new_card;
+    }
+    return ESP_OK;
+
+fail:
+    if (fs != NULL) {
+        (void)f_mount(NULL, drv, 0);
+    }
+    if (vfs_registered) {
+        (void)esp_vfs_fat_unregister_path(base_path);
+    }
+    if (diskio_registered) {
+        ff_diskio_unregister(pdrv);
+    }
+    if (card_handle >= 0) {
+        (void)sdspi_host_remove_device(card_handle);
+    }
+    free(dup_path);
+    free(new_card);
+    return err;
+}
+
+static esp_err_t watcher_sdspi_unmount_without_crc_cmd(const char *mount_point) {
+    if (card == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const char *base_path = sdcard_base_path != NULL ? sdcard_base_path : mount_point;
+    char drv[3] = {(char)('0' + sdcard_pdrv), ':', '\0'};
+
+    if (sdcard_fs != NULL) {
+        (void)f_mount(NULL, drv, 0);
+    }
+    if (base_path != NULL) {
+        (void)esp_vfs_fat_unregister_path(base_path);
+    }
+    if (sdcard_pdrv != FF_DRV_NOT_USED) {
+        ff_diskio_unregister(sdcard_pdrv);
+    }
+    (void)sdspi_host_remove_device(card->host.slot);
+
+    free(sdcard_base_path);
+    free(card);
+    sdcard_base_path = NULL;
+    sdcard_fs = NULL;
+    sdcard_pdrv = FF_DRV_NOT_USED;
+    card = NULL;
+    return ESP_OK;
+}
 
 static size_t bsp_lcd_max_transfer_bytes(void) {
     size_t max_transfer = DRV_LCD_H_RES * DRV_LCD_V_RES * DRV_LCD_BITS_PER_PIXEL / 8 / CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV;
@@ -839,12 +1040,41 @@ bool bsp_sdcard_is_inserted(void) {
 }
 
 esp_err_t bsp_sdcard_init(char *mount_point, size_t max_files) {
+    esp_err_t ret;
+
     if (card != NULL) {
         return ESP_OK;
     }
 
-    BSP_ERROR_CHECK_RETURN_ERR(bsp_spi_bus_init());
+    ret = bsp_spi_bus_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize SPI bus for SD card: %s", esp_err_to_name(ret));
+        return ret;
+    }
     bsp_io_expander_init();
+
+    // SD and SSCMA share SPI2. Drive both chip selects high before probing the card
+    // so the uninitialized peer device cannot see the bus handshake.
+    const gpio_config_t shared_bus_cs_config = {
+        .pin_bit_mask = (1ULL << BSP_SD_SPI_CS) | (1ULL << BSP_SSCMA_CLIENT_SPI_CS),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ret = gpio_config(&shared_bus_cs_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to configure SPI2 chip selects for SD card: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ret = bsp_exp_io_set_level(BSP_PWR_AI_CHIP, 0);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to power down SSCMA client during SD init: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    gpio_set_level(BSP_SSCMA_CLIENT_SPI_CS, 1);
+    gpio_set_level(BSP_SD_SPI_CS, 1);
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
     host.slot = BSP_SD_SPI_NUM;
@@ -853,7 +1083,12 @@ esp_err_t bsp_sdcard_init(char *mount_point, size_t max_files) {
     slot_config.host_id = host.slot;
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
         .format_if_mount_failed = false, .max_files = max_files, .allocation_unit_size = 16 * 1024};
-    BSP_ERROR_CHECK_RETURN_ERR(esp_vfs_fat_sdspi_mount(mount_point, &host, &slot_config, &mount_config, &card));
+    ret = watcher_sdspi_mount_without_crc_cmd(mount_point, &slot_config, &mount_config, &card);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to mount SD card at %s: %s", mount_point ? mount_point : "<null>", esp_err_to_name(ret));
+        card = NULL;
+        return ret;
+    }
     sdmmc_card_print_info(stdout, card);
 
     return ESP_OK;
@@ -868,11 +1103,7 @@ esp_err_t bsp_sdcard_deinit(char *mount_point) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t ret_val = esp_vfs_fat_sdcard_unmount(mount_point, card);
-
-    card = NULL;
-
-    return ret_val;
+    return watcher_sdspi_unmount_without_crc_cmd(mount_point);
 }
 
 esp_err_t bsp_sdcard_deinit_default(void) {
@@ -1234,6 +1465,10 @@ sscma_client_handle_t bsp_sscma_client_init() {
 
     if (bsp_io_expander_init() == NULL)
         return NULL;
+
+    if (bsp_exp_io_set_level(BSP_PWR_AI_CHIP, 1) != ESP_OK)
+        return NULL;
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     if (bsp_spi_bus_init() != ESP_OK)
         return NULL;

@@ -47,6 +47,7 @@ tools/output/
 firmware/s3/monitor-*.log
 firmware/s3/flash-session-com*.log
 firmware/*/build-*/
+firmware/s3/release/*/sdcard/
 
 # IDF Component Manager local config
 idf_component_manager.yml
