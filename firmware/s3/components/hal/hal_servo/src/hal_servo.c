@@ -11,17 +11,18 @@
  * PWM Configuration:
  *   - 50Hz frequency (20ms period)
  *   - 14-bit resolution (16384 levels)
- *   - Pulse width: 1ms (0 deg) to 2ms (180 deg)
+ *   - MS90 pulse width: 500us (logical 0 deg) to 2500us (logical 180 deg)
+ *   - Logical neutral 90 deg -> physical neutral 1500us
  */
 
 #include "hal_servo.h"
 #include "driver/ledc.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/portmacro.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "freertos/portmacro.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -35,16 +36,15 @@
 #define LEDC_CHANNEL_X LEDC_CHANNEL_0
 #define LEDC_CHANNEL_Y LEDC_CHANNEL_1
 
-/* Servo PWM timing (typical hobby servo) */
-#define SERVO_PERIOD_US 20000   /* 20ms for 50Hz */
-#define SERVO_MIN_PULSE_US 1000 /* 1ms = 0 degrees */
-#define SERVO_MAX_PULSE_US 2000 /* 2ms = 180 degrees */
-#define SERVO_RANGE_DEG 180
-
-/* Duty cycle values for 14-bit resolution */
+/* MS90 servo PWM timing */
+#define SERVO_PERIOD_US 20000
+#define SERVO_MIN_PULSE_US 500
+#define SERVO_NEUTRAL_PULSE_US 1500
+#define SERVO_MAX_PULSE_US 2500
+#define SERVO_LOGICAL_RANGE_DEG 180
+#define SERVO_LOGICAL_NEUTRAL_DEG 90
+#define SERVO_TRAVEL_FROM_NEUTRAL_US (SERVO_MAX_PULSE_US - SERVO_NEUTRAL_PULSE_US)
 #define DUTY_RESOLUTION 16384
-#define DUTY_MIN (SERVO_MIN_PULSE_US * DUTY_RESOLUTION / SERVO_PERIOD_US) /* ~819 */
-#define DUTY_MAX (SERVO_MAX_PULSE_US * DUTY_RESOLUTION / SERVO_PERIOD_US) /* ~1638 */
 
 /* Smooth move task configuration */
 #define SERVO_TASK_STACK_SIZE 4096
@@ -93,9 +93,12 @@ static uint32_t s_cmd_seq = 0;
 
 /* Forward declarations */
 static void servo_task(void *arg);
-static int angle_to_duty(int angle_deg);
-static int servo_map_physical_angle(servo_axis_t axis, int logical_angle_deg);
+static int div_round_nearest(int numerator, int denominator);
+static int servo_apply_rotation_direction(servo_axis_t axis, int relative_deg);
+static int logical_angle_to_pulse_width_us(servo_axis_t axis, int logical_angle_deg);
+static int pulse_width_us_to_duty(int pulse_width_us);
 static int angle_to_duty_mapped(servo_axis_t axis, int logical_angle_deg);
+static void servo_log_target_mapping(servo_axis_t axis, int logical_angle_deg, const char *context);
 static esp_err_t set_duty(servo_axis_t axis, int duty);
 static esp_err_t configure_ledc(void);
 static void move_to_angle_immediate(servo_axis_t axis, int angle_deg);
@@ -108,40 +111,97 @@ static void servo_log_execute_start(const servo_cmd_msg_t *cmd);
 static void servo_log_execute_done(const servo_cmd_msg_t *cmd, uint32_t exec_ms);
 
 /**
- * @brief Convert angle in degrees to LEDC duty cycle value.
+ * @brief Divide and round to the nearest integer.
  *
- * @param angle_deg Angle 0-180 degrees
- * @return Duty cycle value for 14-bit resolution
+ * Keeps the integer-only mapping stable for both positive and negative values.
  */
-static int angle_to_duty(int angle_deg) {
-    if (angle_deg < 0)
-        angle_deg = 0;
-    if (angle_deg > SERVO_RANGE_DEG)
-        angle_deg = SERVO_RANGE_DEG;
+static int div_round_nearest(int numerator, int denominator) {
+    if (numerator >= 0) {
+        return (numerator + (denominator / 2)) / denominator;
+    }
 
-    /* Linear interpolation: duty = DUTY_MIN + (angle * (DUTY_MAX - DUTY_MIN) / 180) */
-    return DUTY_MIN + (angle_deg * (DUTY_MAX - DUTY_MIN) / SERVO_RANGE_DEG);
+    return (numerator - (denominator / 2)) / denominator;
 }
 
 /**
- * @brief Map logical control angle to physical servo angle.
+ * @brief Apply the installation-specific rotation direction.
  *
- * Current hardware wiring expects direct mapping:
- * logical angle == physical angle for both X and Y axis.
+ * The MS90 datasheet defines increasing pulse width as counterclockwise.
+ * The current mechanical installation uses the same positive direction for
+ * both logical axes, so this hook returns the relative angle unchanged.
  */
-static int servo_map_physical_angle(servo_axis_t axis, int logical_angle_deg) {
+static int servo_apply_rotation_direction(servo_axis_t axis, int relative_deg) {
     (void)axis;
-    int physical = logical_angle_deg;
+    return relative_deg;
+}
 
-    if (physical < 0)
-        physical = 0;
-    if (physical > SERVO_RANGE_DEG)
-        physical = SERVO_RANGE_DEG;
-    return physical;
+/**
+ * @brief Convert logical installation-space angle to MS90 pulse width.
+ *
+ * Public APIs continue to use logical angles in the 0-180 range where 90 deg
+ * is the installed neutral position. Internally the MS90 is driven with a
+ * 500-2500us pulse range and a 1500us neutral pulse.
+ */
+static int logical_angle_to_pulse_width_us(servo_axis_t axis, int logical_angle_deg) {
+    int clamped_angle = logical_angle_deg;
+    int logical_relative_deg;
+    int physical_relative_deg;
+    int pulse_width_us;
+
+    if (clamped_angle < 0) {
+        clamped_angle = 0;
+    }
+    if (clamped_angle > SERVO_LOGICAL_RANGE_DEG) {
+        clamped_angle = SERVO_LOGICAL_RANGE_DEG;
+    }
+
+    logical_relative_deg = clamped_angle - SERVO_LOGICAL_NEUTRAL_DEG;
+    physical_relative_deg = servo_apply_rotation_direction(axis, logical_relative_deg);
+
+    if (physical_relative_deg < -SERVO_LOGICAL_NEUTRAL_DEG) {
+        physical_relative_deg = -SERVO_LOGICAL_NEUTRAL_DEG;
+    }
+    if (physical_relative_deg > SERVO_LOGICAL_NEUTRAL_DEG) {
+        physical_relative_deg = SERVO_LOGICAL_NEUTRAL_DEG;
+    }
+
+    pulse_width_us = SERVO_NEUTRAL_PULSE_US +
+                     div_round_nearest(physical_relative_deg * SERVO_TRAVEL_FROM_NEUTRAL_US, SERVO_LOGICAL_NEUTRAL_DEG);
+
+    if (pulse_width_us < SERVO_MIN_PULSE_US) {
+        pulse_width_us = SERVO_MIN_PULSE_US;
+    }
+    if (pulse_width_us > SERVO_MAX_PULSE_US) {
+        pulse_width_us = SERVO_MAX_PULSE_US;
+    }
+
+    return pulse_width_us;
+}
+
+/**
+ * @brief Convert pulse width in microseconds to LEDC duty cycle value.
+ */
+static int pulse_width_us_to_duty(int pulse_width_us) {
+    if (pulse_width_us < SERVO_MIN_PULSE_US) {
+        pulse_width_us = SERVO_MIN_PULSE_US;
+    }
+    if (pulse_width_us > SERVO_MAX_PULSE_US) {
+        pulse_width_us = SERVO_MAX_PULSE_US;
+    }
+
+    return div_round_nearest(pulse_width_us * DUTY_RESOLUTION, SERVO_PERIOD_US);
 }
 
 static int angle_to_duty_mapped(servo_axis_t axis, int logical_angle_deg) {
-    return angle_to_duty(servo_map_physical_angle(axis, logical_angle_deg));
+    return pulse_width_us_to_duty(logical_angle_to_pulse_width_us(axis, logical_angle_deg));
+}
+
+static void servo_log_target_mapping(servo_axis_t axis, int logical_angle_deg, const char *context) {
+    int pulse_width_us = logical_angle_to_pulse_width_us(axis, logical_angle_deg);
+    int duty = pulse_width_us_to_duty(pulse_width_us);
+
+    ESP_LOGI(TAG, "Map servo %s axis=%s logical=%d pulse=%dus duty=%d", context != NULL ? context : "target",
+             axis == SERVO_AXIS_X ? "X" : "Y", logical_angle_deg, pulse_width_us, duty);
 }
 
 /**
@@ -216,8 +276,9 @@ static esp_err_t configure_ledc(void) {
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "LEDC configured: %dHz, %d-bit, GPIO %d (X), GPIO %d (Y)", LEDC_FREQ_HZ, LEDC_DUTY_RES,
-             CONFIG_WATCHER_SERVO_X_GPIO, CONFIG_WATCHER_SERVO_Y_GPIO);
+    ESP_LOGI(TAG, "LEDC configured: %dHz, %d-bit, GPIO %d (X), GPIO %d (Y), pulse=%d..%dus neutral=%dus", LEDC_FREQ_HZ,
+             LEDC_DUTY_RES, CONFIG_WATCHER_SERVO_X_GPIO, CONFIG_WATCHER_SERVO_Y_GPIO, SERVO_MIN_PULSE_US,
+             SERVO_MAX_PULSE_US, SERVO_NEUTRAL_PULSE_US);
 
     return ESP_OK;
 }
@@ -263,20 +324,12 @@ static void servo_log_enqueue(const servo_cmd_msg_t *cmd) {
     }
 
     if (cmd->type == CMD_TYPE_SINGLE) {
-        ESP_LOGI(TAG,
-                 "Queue servo cmd seq=%lu type=single axis=%s target=%d duration_ms=%d q_depth=%lu",
-                 (unsigned long)cmd->seq_no,
-                 cmd->single.axis == SERVO_AXIS_X ? "X" : "Y",
-                 cmd->single.angle_deg,
-                 cmd->single.duration_ms,
-                 (unsigned long)servo_queue_depth());
+        ESP_LOGI(TAG, "Queue servo cmd seq=%lu type=single axis=%s target=%d duration_ms=%d q_depth=%lu",
+                 (unsigned long)cmd->seq_no, cmd->single.axis == SERVO_AXIS_X ? "X" : "Y", cmd->single.angle_deg,
+                 cmd->single.duration_ms, (unsigned long)servo_queue_depth());
     } else {
-        ESP_LOGI(TAG,
-                 "Queue servo cmd seq=%lu type=sync x=%d y=%d duration_ms=%d q_depth=%lu",
-                 (unsigned long)cmd->seq_no,
-                 cmd->sync.x_deg,
-                 cmd->sync.y_deg,
-                 cmd->sync.duration_ms,
+        ESP_LOGI(TAG, "Queue servo cmd seq=%lu type=sync x=%d y=%d duration_ms=%d q_depth=%lu",
+                 (unsigned long)cmd->seq_no, cmd->sync.x_deg, cmd->sync.y_deg, cmd->sync.duration_ms,
                  (unsigned long)servo_queue_depth());
     }
 }
@@ -287,23 +340,14 @@ static void servo_log_drop(const servo_cmd_msg_t *cmd, const char *reason) {
     }
 
     if (cmd->type == CMD_TYPE_SINGLE) {
-        ESP_LOGW(TAG,
-                 "Drop servo cmd seq=%lu reason=%s axis=%s target=%d duration_ms=%d q_depth=%lu",
-                 (unsigned long)cmd->seq_no,
-                 reason != NULL ? reason : "unknown",
-                 cmd->single.axis == SERVO_AXIS_X ? "X" : "Y",
-                 cmd->single.angle_deg,
-                 cmd->single.duration_ms,
+        ESP_LOGW(TAG, "Drop servo cmd seq=%lu reason=%s axis=%s target=%d duration_ms=%d q_depth=%lu",
+                 (unsigned long)cmd->seq_no, reason != NULL ? reason : "unknown",
+                 cmd->single.axis == SERVO_AXIS_X ? "X" : "Y", cmd->single.angle_deg, cmd->single.duration_ms,
                  (unsigned long)servo_queue_depth());
     } else {
-        ESP_LOGW(TAG,
-                 "Drop servo cmd seq=%lu reason=%s x=%d y=%d duration_ms=%d q_depth=%lu",
-                 (unsigned long)cmd->seq_no,
-                 reason != NULL ? reason : "unknown",
-                 cmd->sync.x_deg,
-                 cmd->sync.y_deg,
-                 cmd->sync.duration_ms,
-                 (unsigned long)servo_queue_depth());
+        ESP_LOGW(TAG, "Drop servo cmd seq=%lu reason=%s x=%d y=%d duration_ms=%d q_depth=%lu",
+                 (unsigned long)cmd->seq_no, reason != NULL ? reason : "unknown", cmd->sync.x_deg, cmd->sync.y_deg,
+                 cmd->sync.duration_ms, (unsigned long)servo_queue_depth());
     }
 }
 
@@ -318,21 +362,15 @@ static void servo_log_execute_start(const servo_cmd_msg_t *cmd) {
     if (cmd->type == CMD_TYPE_SINGLE) {
         ESP_LOGI(TAG,
                  "Start servo cmd seq=%lu type=single axis=%s target=%d duration_ms=%d queued_ms=%lu q_remaining=%lu",
-                 (unsigned long)cmd->seq_no,
-                 cmd->single.axis == SERVO_AXIS_X ? "X" : "Y",
-                 cmd->single.angle_deg,
-                 cmd->single.duration_ms,
-                 (unsigned long)waited_ms,
-                 (unsigned long)servo_queue_depth());
+                 (unsigned long)cmd->seq_no, cmd->single.axis == SERVO_AXIS_X ? "X" : "Y", cmd->single.angle_deg,
+                 cmd->single.duration_ms, (unsigned long)waited_ms, (unsigned long)servo_queue_depth());
+        servo_log_target_mapping(cmd->single.axis, cmd->single.angle_deg, "cmd");
     } else {
-        ESP_LOGI(TAG,
-                 "Start servo cmd seq=%lu type=sync x=%d y=%d duration_ms=%d queued_ms=%lu q_remaining=%lu",
-                 (unsigned long)cmd->seq_no,
-                 cmd->sync.x_deg,
-                 cmd->sync.y_deg,
-                 cmd->sync.duration_ms,
-                 (unsigned long)waited_ms,
-                 (unsigned long)servo_queue_depth());
+        ESP_LOGI(TAG, "Start servo cmd seq=%lu type=sync x=%d y=%d duration_ms=%d queued_ms=%lu q_remaining=%lu",
+                 (unsigned long)cmd->seq_no, cmd->sync.x_deg, cmd->sync.y_deg, cmd->sync.duration_ms,
+                 (unsigned long)waited_ms, (unsigned long)servo_queue_depth());
+        servo_log_target_mapping(SERVO_AXIS_X, cmd->sync.x_deg, "sync-x");
+        servo_log_target_mapping(SERVO_AXIS_Y, cmd->sync.y_deg, "sync-y");
     }
 }
 
@@ -344,14 +382,9 @@ static void servo_log_execute_done(const servo_cmd_msg_t *cmd, uint32_t exec_ms)
         return;
     }
 
-    ESP_LOGI(TAG,
-             "Done servo cmd seq=%lu type=%s exec_ms=%lu final={x=%d y=%d} q_depth=%lu",
-             (unsigned long)cmd->seq_no,
-             cmd->type == CMD_TYPE_SINGLE ? "single" : "sync",
-             (unsigned long)exec_ms,
-             current_x,
-             current_y,
-             (unsigned long)servo_queue_depth());
+    ESP_LOGI(TAG, "Done servo cmd seq=%lu type=%s exec_ms=%lu final={x=%d y=%d} q_depth=%lu",
+             (unsigned long)cmd->seq_no, cmd->type == CMD_TYPE_SINGLE ? "single" : "sync", (unsigned long)exec_ms,
+             current_x, current_y, (unsigned long)servo_queue_depth());
 }
 
 /**
@@ -405,11 +438,8 @@ static void servo_task(void *arg) {
 
             /* Skip if already at target */
             if (start_deg == target_deg) {
-                ESP_LOGI(TAG,
-                         "Skip servo cmd seq=%lu axis=%s already at target=%d",
-                         (unsigned long)cmd.seq_no,
-                         axis == SERVO_AXIS_X ? "X" : "Y",
-                         target_deg);
+                ESP_LOGI(TAG, "Skip servo cmd seq=%lu axis=%s already at target=%d", (unsigned long)cmd.seq_no,
+                         axis == SERVO_AXIS_X ? "X" : "Y", target_deg);
                 servo_log_execute_done(&cmd, servo_now_ms() - exec_started_ms);
                 continue;
             }
@@ -611,11 +641,8 @@ esp_err_t hal_servo_move_smooth(servo_axis_t axis, int angle_deg, int duration_m
 
     /* For zero duration, use immediate move */
     if (duration_ms <= 0) {
-        ESP_LOGI(TAG,
-                 "Immediate servo cmd type=single axis=%s target=%d duration_ms=%d",
-                 axis == SERVO_AXIS_X ? "X" : "Y",
-                 angle_deg,
-                 duration_ms);
+        ESP_LOGI(TAG, "Immediate servo cmd type=single axis=%s target=%d duration_ms=%d",
+                 axis == SERVO_AXIS_X ? "X" : "Y", angle_deg, duration_ms);
         return hal_servo_set_angle(axis, angle_deg);
     }
 

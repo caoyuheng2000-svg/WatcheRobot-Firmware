@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Documented the startup angles used by `hal_servo_init()` and aligned the
   README/API docs with the current Y-axis soft-limit behavior.
+- Switched the internal PWM mapping to the MS90 pulse model: `500..2500us`
+  with `1500us` neutral while keeping public control angles in the existing
+  `0..180` logical installation space (`90` remains neutral).
 
 ## [2.0.0] - 2025-03-13
 

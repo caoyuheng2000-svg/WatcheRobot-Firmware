@@ -30,9 +30,17 @@ typedef enum {
  * Configures GPIO 19 (X axis) and GPIO 20 (Y axis) as LEDC PWM channels
  * and starts the smooth-move background task.
  *
- * Startup defaults:
+ * Logical angle model:
+ *   - Public APIs use installation-space logical angles in the 0-180 range
+ *   - 90° is the installed neutral position for the current mechanism
+ *   - Internally the HAL maps logical 90° to the MS90 neutral pulse of 1500us
+ *
+ * Startup defaults applied directly by hal_servo_init():
  *   - X axis: 90°
- *   - Y axis: 120° (clamped to the configured Y soft limits)
+ *   - Y axis: 90°
+ *
+ * Note: some behavior states later move Y to 120° after startup. That behavior
+ * is defined by the state/action resources, not by the HAL defaults.
  *
  * @note Must be called before any hal_servo_set_angle() calls.
  * @note GPIO 19/20 are repurposed from UART (MCU communication removed in v2.0).
@@ -47,7 +55,7 @@ esp_err_t hal_servo_init(void);
  * @brief Set servo angle immediately (no smoothing).
  *
  * @param axis    Servo axis (X or Y)
- * @param angle   Target angle in degrees (0–180)
+ * @param angle   Target logical angle in degrees (0–180, neutral at 90)
  * @return ESP_OK on success, ESP_ERR_INVALID_ARG if angle out of range
  */
 esp_err_t hal_servo_set_angle(servo_axis_t axis, int angle_deg);
@@ -59,7 +67,7 @@ esp_err_t hal_servo_set_angle(servo_axis_t axis, int angle_deg);
  * from current position to target over duration_ms milliseconds.
  *
  * @param axis        Servo axis (X or Y)
- * @param angle_deg   Target angle (0–180)
+ * @param angle_deg   Target logical angle (0–180, neutral at 90)
  * @param duration_ms Movement duration in milliseconds
  * @return ESP_OK on success
  */
@@ -68,8 +76,8 @@ esp_err_t hal_servo_move_smooth(servo_axis_t axis, int angle_deg, int duration_m
 /**
  * @brief Move both axes simultaneously.
  *
- * @param x_deg       Target X angle (0–180)
- * @param y_deg       Target Y angle (0–180)
+ * @param x_deg       Target logical X angle (0–180, neutral at 90)
+ * @param y_deg       Target logical Y angle (0–180, neutral at 90)
  * @param duration_ms Movement duration in milliseconds
  * @return ESP_OK on success
  */
@@ -82,7 +90,7 @@ esp_err_t hal_servo_move_sync(int x_deg, int y_deg, int duration_ms);
  * hal_servo_move_smooth() call.
  *
  * @param id          Axis identifier ("X" or "Y", case-insensitive)
- * @param angle_deg   Target angle (0–180)
+ * @param angle_deg   Target logical angle (0–180, neutral at 90)
  * @param duration_ms Movement duration in milliseconds
  * @return ESP_OK on success, ESP_ERR_INVALID_ARG if id is unknown
  */
@@ -92,7 +100,7 @@ esp_err_t hal_servo_send_cmd(const char *id, int angle_deg, int duration_ms);
  * @brief Get current servo angle.
  *
  * @param axis Servo axis
- * @return Current angle in degrees, or -1 if not initialized
+ * @return Current logical angle in degrees, or -1 if not initialized
  */
 int hal_servo_get_angle(servo_axis_t axis);
 

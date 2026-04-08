@@ -2,12 +2,23 @@
 
 Servo HAL for LEDC PWM direct drive on GPIO 19 (X-axis) and GPIO 20 (Y-axis).
 
-On startup, the HAL applies the default angles `X=90°` and `Y=120°`, then keeps
-Y clamped to the configured soft limits.
+The HAL keeps the existing installation-space angle contract used by the rest of
+the firmware:
+
+- public control angles stay in the `0-180°` range
+- `90°` remains the installed neutral position
+- the HAL internally maps logical `90°` to the MS90 neutral pulse of `1500us`
+
+On startup, `hal_servo_init()` itself applies the default angles `X=90°` and
+`Y=90°`. Some behavior states later move Y to `120°`; that comes from the
+behavior resources, not from the HAL defaults.
 
 ## Overview
 
-This component provides the hardware abstraction layer for dual-axis servo control on the WatcheRobot ESP32-S3 platform. It replaces the UART-to-MCU servo bridge used in v1.x with direct LEDC PWM control.
+This component provides the hardware abstraction layer for dual-axis servo
+control on the WatcheRobot ESP32-S3 platform. It replaces the UART-to-MCU servo
+bridge used in v1.x with direct LEDC PWM control and encapsulates the MS90
+physical pulse model behind the existing firmware-facing logical angle model.
 
 ## Features
 
@@ -20,10 +31,10 @@ This component provides the hardware abstraction layer for dual-axis servo contr
 
 ## GPIO Mapping
 
-| Axis | GPIO | LEDC Channel | Range |
-|------|------|--------------|-------|
-| X (pan) | 19 | LEDC_TIMER_0, CH0 | 0-180° |
-| Y (tilt) | 20 | LEDC_TIMER_0, CH1 | 90-150° soft limit, default startup 120° |
+| Axis | GPIO | LEDC Channel | Logical Range |
+|------|------|--------------|---------------|
+| X (pan) | 19 | LEDC_TIMER_0, CH0 | 0-180°, neutral at 90° |
+| Y (tilt) | 20 | LEDC_TIMER_0, CH1 | 90-150° soft limit, neutral at 90° |
 
 ## API Reference
 
@@ -38,14 +49,18 @@ smooth-move background task. Must be called before any other servo functions.
 
 ### Startup Position
 
-Immediately after `hal_servo_init()`, the current angles are:
+Immediately after `hal_servo_init()`, the current logical angles are:
 
 - `SERVO_AXIS_X`: `90°`
-- `SERVO_AXIS_Y`: `120°`
+- `SERVO_AXIS_Y`: `90°`
 
 Those values are also what the PWM outputs are configured to at boot, so
 `hal_servo_get_angle()` returns the expected current position right after
 initialization.
+
+After startup, the behavior layer may still command poses such as `Y=120°`
+through `states.json` or `spiffs/actions/*.json`. Those resources remain in the
+same logical angle space and are not rewritten by the HAL.
 
 ### Immediate Movement
 
@@ -56,7 +71,7 @@ esp_err_t hal_servo_set_angle(servo_axis_t axis, int angle_deg);
 Set servo angle immediately without smoothing.
 
 - `axis`: `SERVO_AXIS_X` or `SERVO_AXIS_Y`
-- `angle_deg`: Target angle (0-180°)
+- `angle_deg`: Target logical angle (0-180°, neutral at 90°)
 - Returns: `ESP_OK` on success, `ESP_ERR_INVALID_ARG` if angle out of range
 
 ### Smooth Movement
@@ -68,7 +83,7 @@ esp_err_t hal_servo_move_smooth(servo_axis_t axis, int angle_deg, int duration_m
 Move servo to angle with linear interpolation over specified duration.
 
 - `axis`: `SERVO_AXIS_X` or `SERVO_AXIS_Y`
-- `angle_deg`: Target angle (0-180°)
+- `angle_deg`: Target logical angle (0-180°, neutral at 90°)
 - `duration_ms`: Movement duration in milliseconds
 - Returns: `ESP_OK` on success, `ESP_ERR_TIMEOUT` if queue is full
 
@@ -80,8 +95,8 @@ esp_err_t hal_servo_move_sync(int x_deg, int y_deg, int duration_ms);
 
 Move both axes simultaneously with coordinated timing.
 
-- `x_deg`: X-axis target angle (0-180°)
-- `y_deg`: Y-axis target angle (0-180°)
+- `x_deg`: Logical X target angle (0-180°, neutral at 90°)
+- `y_deg`: Logical Y target angle (0-180°, neutral at 90°)
 - `duration_ms`: Movement duration in milliseconds
 - Returns: `ESP_OK` on success
 
@@ -94,7 +109,7 @@ esp_err_t hal_servo_send_cmd(const char *id, int angle_deg, int duration_ms);
 Convenience wrapper for WebSocket handlers. Maps "X"/"Y" strings to axis.
 
 - `id`: Axis identifier ("X" or "Y", case-insensitive)
-- `angle_deg`: Target angle
+- `angle_deg`: Target logical angle
 - `duration_ms`: Movement duration
 - Returns: `ESP_OK` on success, `ESP_ERR_INVALID_ARG` if id unknown
 
@@ -104,9 +119,9 @@ Convenience wrapper for WebSocket handlers. Maps "X"/"Y" strings to axis.
 int hal_servo_get_angle(servo_axis_t axis);
 ```
 
-Get current servo angle.
+Get current logical servo angle.
 
-- Returns: Current angle in degrees, or -1 if not initialized
+- Returns: Current logical angle in degrees, or -1 if not initialized
 
 ## Configuration (Kconfig)
 
@@ -122,8 +137,18 @@ Get current servo angle.
 
 - **Frequency**: 50Hz (20ms period)
 - **Resolution**: 14-bit (16384 levels)
-- **Pulse Width**: 1ms (0°) to 2ms (180°)
-- **Duty Cycle**: 819 (0°) to 1638 (180°)
+- **MS90 Pulse Width**: 500us (logical 0°) to 2500us (logical 180°)
+- **Neutral Pulse**: 1500us at logical 90°
+- **Duty Cycle**: about 410 (500us) to 2048 (2500us)
+
+## Logical vs Physical Angle
+
+- The firmware-facing API keeps using installation-space logical angles
+- Logical `90°` means "installed neutral pose"
+- The HAL converts that pose to the MS90 physical neutral pulse of `1500us`
+- Logical `0°` maps to `500us`
+- Logical `180°` maps to `2500us`
+- Logical `120°` maps to about `1833us`
 
 ## Usage Example
 
@@ -132,7 +157,7 @@ Get current servo angle.
 
 void app_main(void)
 {
-    // Initialize servo HAL; the current position starts at X=90, Y=120
+    // Initialize servo HAL; startup defaults are X=90, Y=90
     ESP_ERROR_CHECK(hal_servo_init());
 
     // Smooth pan over 1 second
@@ -163,8 +188,9 @@ void app_main(void)
 ## Mechanical Limits
 
 The Y-axis has mechanical limits (default 90-150°) to prevent hardware damage.
-The startup angle is 120°, which is inside the soft limit range. These are
-enforced automatically:
+The HAL startup angle is 90°, and some behavior states later move the Y-axis to
+120° inside that same logical angle space. These limits are enforced
+automatically:
 
 - `hal_servo_set_angle()`: Clamps Y-axis to limits
 - `hal_servo_move_smooth()`: Clamps Y-axis target
