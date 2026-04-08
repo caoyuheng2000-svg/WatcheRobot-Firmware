@@ -51,6 +51,7 @@ extern const lv_font_t lv_font_montserrat_24;
 
 static lv_obj_t *label_text = NULL;
 static lv_obj_t *img_emoji = NULL;
+static lv_obj_t *text_overlay = NULL;
 static bool minimal_initialized = false;
 static bool is_initialized = false;
 static bool inputs_initialized = false;
@@ -114,11 +115,29 @@ static const lv_font_t *hal_display_select_text_font(const char *text, int font_
 #endif
 }
 
-static void hal_display_apply_text_style_locked(const char *text, int font_size, lv_color_t text_color) {
+static void hal_display_update_text_overlay_visibility_locked(const char *text) {
+    if (text_overlay == NULL) {
+        return;
+    }
+
+    if (text != NULL && text[0] != '\0') {
+        lv_obj_clear_flag(text_overlay, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(text_overlay, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void hal_display_apply_text_style_locked(const char *text, int font_size, bool alert_text) {
     const lv_font_t *font = hal_display_select_text_font(text, font_size);
+    lv_color_t text_color = alert_text ? lv_palette_main(LV_PALETTE_RED) : lv_color_white();
 
     lv_obj_set_style_text_font(label_text, font, 0);
     lv_obj_set_style_text_color(label_text, text_color, 0);
+    if (text_overlay != NULL) {
+        lv_obj_set_style_bg_color(text_overlay, alert_text ? lv_palette_darken(LV_PALETTE_RED, 4) : lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(text_overlay, LV_OPA_70, 0);
+        lv_obj_set_style_border_color(text_overlay, alert_text ? lv_palette_lighten(LV_PALETTE_RED, 1) : lv_color_hex(0x303030), 0);
+    }
 }
 
 static void hal_display_general_i2c_delay(void) {
@@ -398,9 +417,43 @@ static emoji_anim_type_t map_emoji_type(int ui_emoji_id) {
 }
 
 static void hal_display_raise_text_overlay_locked(void) {
-    if (label_text != NULL) {
+    if (text_overlay != NULL) {
+        lv_obj_move_foreground(text_overlay);
+    } else if (label_text != NULL) {
         lv_obj_move_foreground(label_text);
     }
+}
+
+static void hal_display_create_text_overlay_locked(lv_obj_t *parent, const char *initial_text) {
+    text_overlay = lv_obj_create(parent);
+    lv_obj_remove_style_all(text_overlay);
+    lv_obj_set_width(text_overlay, 388);
+    lv_obj_set_height(text_overlay, LV_SIZE_CONTENT);
+    lv_obj_clear_flag(text_overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_layout(text_overlay, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(text_overlay, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(text_overlay, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_radius(text_overlay, 18, 0);
+    lv_obj_set_style_pad_left(text_overlay, 16, 0);
+    lv_obj_set_style_pad_right(text_overlay, 16, 0);
+    lv_obj_set_style_pad_top(text_overlay, 12, 0);
+    lv_obj_set_style_pad_bottom(text_overlay, 12, 0);
+    lv_obj_set_style_bg_color(text_overlay, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(text_overlay, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(text_overlay, 1, 0);
+    lv_obj_set_style_border_color(text_overlay, lv_color_hex(0x303030), 0);
+    lv_obj_align(text_overlay, LV_ALIGN_TOP_MID, 0, 18);
+
+    label_text = lv_label_create(text_overlay);
+    lv_obj_set_width(label_text, LV_PCT(100));
+    lv_label_set_long_mode(label_text, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(label_text, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(label_text, initial_text != NULL ? initial_text : "");
+    lv_obj_set_style_text_color(label_text, lv_color_white(), 0);
+    lv_obj_set_style_text_font(label_text, hal_display_select_text_font(initial_text, 24), 0);
+
+    hal_display_update_text_overlay_visibility_locked(initial_text);
+    hal_display_raise_text_overlay_locked();
 }
 
 static size_t hal_display_max_transfer_bytes(void) {
@@ -765,15 +818,8 @@ int hal_display_init(void) {
     img_emoji = lv_img_create(scr);
     lv_obj_align(img_emoji, LV_ALIGN_CENTER, 0, 0);
 
-    /* 7. Create text label AFTER emoji - so it's in foreground */
-    label_text = lv_label_create(scr);
-    lv_obj_set_width(label_text, 380);
-    lv_label_set_long_mode(label_text, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_align(label_text, LV_TEXT_ALIGN_CENTER, 0); /* Center align text */
-    lv_label_set_text(label_text, "Ready");
-    lv_obj_set_style_text_color(label_text, lv_color_white(), 0);
-    lv_obj_align(label_text, LV_ALIGN_CENTER, 0, -140); /* Move higher to avoid emoji overlap */
-    lv_obj_set_style_text_font(label_text, hal_display_select_text_font("Ready", 24), 0);
+    /* 7. Create text overlay AFTER emoji - so it stays in foreground */
+    hal_display_create_text_overlay_locked(scr, "Ready");
 
     /* 9. Initialize animation system */
     if (emoji_anim_init(img_emoji) == 0) {
@@ -823,15 +869,8 @@ int hal_display_ui_init(void) {
     img_emoji = lv_img_create(scr);
     lv_obj_align(img_emoji, LV_ALIGN_CENTER, 0, 0);
 
-    /* 5. Create text label AFTER emoji - so it's in foreground */
-    label_text = lv_label_create(scr);
-    lv_obj_set_width(label_text, 380);
-    lv_label_set_long_mode(label_text, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_align(label_text, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(label_text, "Ready");
-    lv_obj_set_style_text_color(label_text, lv_color_white(), 0);
-    lv_obj_align(label_text, LV_ALIGN_CENTER, 0, -140);
-    lv_obj_set_style_text_font(label_text, hal_display_select_text_font("Ready", 24), 0);
+    /* 5. Create text overlay AFTER emoji - so it's in foreground */
+    hal_display_create_text_overlay_locked(scr, "Ready");
 
     /* Load the new main screen FIRST - so user sees black screen immediately */
     lv_disp_load_scr(scr);
@@ -922,21 +961,23 @@ int hal_display_set_text_with_style(const char *text, int font_size, bool alert_
     char truncated[MAX_DISPLAY_CHARS + 4];
     int len = strlen(text);
     bool should_truncate = !hal_display_text_has_non_ascii(text) && len > MAX_DISPLAY_CHARS;
-    lv_color_t text_color = alert_text ? lv_palette_main(LV_PALETTE_RED) : lv_color_white();
-
     if (should_truncate) {
         strncpy(truncated, text, MAX_DISPLAY_CHARS);
         strcpy(truncated + MAX_DISPLAY_CHARS, "...");
         ESP_LOGI(TAG, "Set text (truncated): '%s' -> '%s'", text, truncated);
         lvgl_port_lock(0);
-        hal_display_apply_text_style_locked(text, font_size, text_color);
+        hal_display_apply_text_style_locked(text, font_size, alert_text);
         lv_label_set_text(label_text, truncated);
+        hal_display_update_text_overlay_visibility_locked(truncated);
+        hal_display_raise_text_overlay_locked();
         lvgl_port_unlock();
     } else {
         ESP_LOGI(TAG, "Set text: '%s' (size %d)", text, font_size);
         lvgl_port_lock(0);
-        hal_display_apply_text_style_locked(text, font_size, text_color);
+        hal_display_apply_text_style_locked(text, font_size, alert_text);
         lv_label_set_text(label_text, text);
+        hal_display_update_text_overlay_visibility_locked(text);
+        hal_display_raise_text_overlay_locked();
         lvgl_port_unlock();
     }
 
@@ -959,6 +1000,7 @@ int hal_display_set_emoji(int emoji_id) {
     /* emoji_anim_start calls LVGL APIs - must hold lock */
     lvgl_port_lock(0);
     int ret = emoji_anim_start(type);
+    hal_display_raise_text_overlay_locked();
     lvgl_port_unlock();
     if (ret != 0) {
         ESP_LOGW(TAG, "Failed to start animation for emoji ID: %d", emoji_id);
@@ -995,6 +1037,7 @@ int hal_display_start_speaking(void) {
         return -1;
     lvgl_port_lock(0);
     int ret = emoji_anim_start(EMOJI_ANIM_SPEAKING);
+    hal_display_raise_text_overlay_locked();
     lvgl_port_unlock();
     return ret;
 }
@@ -1004,6 +1047,7 @@ int hal_display_start_listening(void) {
         return -1;
     lvgl_port_lock(0);
     int ret = emoji_anim_start(EMOJI_ANIM_LISTENING);
+    hal_display_raise_text_overlay_locked();
     lvgl_port_unlock();
     return ret;
 }
@@ -1013,6 +1057,7 @@ int hal_display_start_analyzing(void) {
         return -1;
     lvgl_port_lock(0);
     int ret = emoji_anim_start(EMOJI_ANIM_PROCESSING);
+    hal_display_raise_text_overlay_locked();
     lvgl_port_unlock();
     return ret;
 }
@@ -1022,6 +1067,7 @@ int hal_display_stop_animation(void) {
         return -1;
     lvgl_port_lock(0);
     int ret = emoji_anim_start(EMOJI_ANIM_STANDBY);
+    hal_display_raise_text_overlay_locked();
     lvgl_port_unlock();
     return ret;
 }
