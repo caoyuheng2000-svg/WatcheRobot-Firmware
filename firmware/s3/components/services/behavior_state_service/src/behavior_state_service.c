@@ -36,8 +36,8 @@
 #define BEHAVIOR_ACTION_DEFAULT_X_DEG 90
 #define BEHAVIOR_ACTION_DEFAULT_Y_DEG 120
 #define BEHAVIOR_DEFAULT_ONESHOT_HOLD_MS 1200U
+#define BEHAVIOR_REQUEST_QUEUE_DEPTH 1
 #define BEHAVIOR_QUERY_LOCK_TIMEOUT_MS 5U
-#define BEHAVIOR_SET_LOCK_TIMEOUT_MS 100U
 #define BEHAVIOR_QUERY_TIMEOUT_LOG_INTERVAL_MS 1000U
 
 typedef struct {
@@ -98,6 +98,7 @@ typedef struct {
 
 typedef struct {
     SemaphoreHandle_t lock;
+    QueueHandle_t request_queue;
     TaskHandle_t task;
     bool initialized;
     behavior_catalog_t catalog;
@@ -134,6 +135,17 @@ typedef struct {
     int font_size;
     display_text_style_t text_style;
 } behavior_display_request_t;
+
+typedef struct {
+    char state_id[BEHAVIOR_STATE_ID_LEN];
+    char text[BEHAVIOR_TEXT_LEN];
+    int font_size;
+    bool has_text;
+    bool alert_text;
+    char anim_id[BEHAVIOR_STATE_ID_LEN];
+    char sound_id[BEHAVIOR_SOUND_ID_LEN];
+    char action_id[BEHAVIOR_STATE_ID_LEN];
+} behavior_state_request_t;
 
 static behavior_context_t s_ctx = {0};
 
@@ -182,6 +194,50 @@ static void behavior_clear_display_request(behavior_display_request_t *request) 
     }
 
     memset(request, 0, sizeof(*request));
+}
+
+static void behavior_fill_state_request(behavior_state_request_t *request,
+                                        const char *state_id,
+                                        const char *text,
+                                        int font_size,
+                                        bool alert_text,
+                                        const char *anim_id,
+                                        const char *sound_id,
+                                        const char *action_id) {
+    if (request == NULL) {
+        return;
+    }
+
+    memset(request, 0, sizeof(*request));
+    behavior_copy_string(request->state_id, sizeof(request->state_id), state_id);
+    behavior_copy_string(request->text, sizeof(request->text), text);
+    request->font_size = font_size;
+    request->has_text = (text != NULL);
+    request->alert_text = alert_text;
+    behavior_copy_string(request->anim_id, sizeof(request->anim_id), anim_id);
+    behavior_copy_string(request->sound_id, sizeof(request->sound_id), sound_id);
+    behavior_copy_string(request->action_id, sizeof(request->action_id), action_id);
+}
+
+static esp_err_t behavior_submit_state_request(const behavior_state_request_t *request) {
+    BaseType_t queue_result;
+
+    if (request == NULL || request->state_id[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_ctx.request_queue == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    queue_result = xQueueOverwrite(s_ctx.request_queue, request);
+    if (queue_result != pdPASS) {
+        return ESP_FAIL;
+    }
+
+    if (s_ctx.task != NULL) {
+        xTaskNotifyGive(s_ctx.task);
+    }
+    return ESP_OK;
 }
 
 static void behavior_capture_display_request_locked(behavior_display_request_t *request) {
@@ -1601,18 +1657,50 @@ static esp_err_t behavior_schedule_state_locked(const char *state_id,
 }
 
 static void behavior_task(void *arg) {
-    char fallback_state[BEHAVIOR_STATE_ID_LEN];
     behavior_display_request_t display_request;
+    behavior_state_request_t state_request;
 
     (void)arg;
 
     while (true) {
-        bool should_fallback = false;
+        bool has_state_request = false;
 
-        fallback_state[0] = '\0';
         behavior_clear_display_request(&display_request);
+        while (s_ctx.request_queue != NULL && xQueueReceive(s_ctx.request_queue, &state_request, 0) == pdTRUE) {
+            has_state_request = true;
+        }
+
         if (behavior_lock()) {
             uint32_t now_ms = behavior_now_ms();
+
+            if (has_state_request) {
+                esp_err_t request_ret = behavior_schedule_state_locked(state_request.state_id,
+                                                                       state_request.has_text ? state_request.text : NULL,
+                                                                       state_request.font_size,
+                                                                       state_request.alert_text,
+                                                                       state_request.anim_id[0] != '\0'
+                                                                           ? state_request.anim_id
+                                                                           : NULL,
+                                                                       state_request.sound_id[0] != '\0'
+                                                                           ? state_request.sound_id
+                                                                           : NULL,
+                                                                       state_request.action_id[0] != '\0'
+                                                                           ? state_request.action_id
+                                                                           : NULL,
+                                                                       &display_request);
+                if (request_ret == ESP_OK) {
+                    ESP_LOGI(TAG,
+                             "Applied queued state request state=%s action=%s",
+                             state_request.state_id,
+                             state_request.action_id[0] != '\0' ? state_request.action_id : "<none>");
+                } else {
+                    ESP_LOGW(TAG,
+                             "Queued state request failed state=%s err=%s",
+                             state_request.state_id,
+                             esp_err_to_name(request_ret));
+                }
+                now_ms = behavior_now_ms();
+            }
 
             if (s_ctx.current_state != NULL) {
                 uint32_t elapsed_ms;
@@ -1642,26 +1730,14 @@ static void behavior_task(void *arg) {
                                 s_ctx.hold_logged = true;
                             }
                         } else {
-                            behavior_copy_string(fallback_state, sizeof(fallback_state), s_ctx.catalog.default_state);
-                            s_ctx.current_state = NULL;
-                            s_ctx.current_action = NULL;
-                            s_ctx.next_motion_index = 0;
-                            s_ctx.next_action_motion_index = 0;
-                            s_ctx.next_expression_index = 0;
-                            s_ctx.next_sound_index = 0;
-                            s_ctx.current_action_id[0] = '\0';
-                            s_ctx.text_override[0] = '\0';
-                            s_ctx.text_override_font_size = 0;
-                            s_ctx.text_override_valid = false;
-                            s_ctx.text_override_alert = false;
-                            s_ctx.anim_override[0] = '\0';
-                            s_ctx.anim_override_valid = false;
-                            s_ctx.sound_override[0] = '\0';
-                            s_ctx.sound_override_valid = false;
-                            s_ctx.suppress_state_sound_events = false;
-                            s_ctx.wait_for_local_sfx_completion = false;
-                            s_ctx.hold_logged = false;
-                            should_fallback = true;
+                            esp_err_t fallback_ret = behavior_schedule_state_locked(
+                                s_ctx.catalog.default_state, NULL, 0, false, NULL, NULL, NULL, &display_request);
+                            if (fallback_ret != ESP_OK) {
+                                ESP_LOGW(TAG,
+                                         "Fallback state request failed state=%s err=%s",
+                                         s_ctx.catalog.default_state,
+                                         esp_err_to_name(fallback_ret));
+                            }
                         }
                     }
                 }
@@ -1670,13 +1746,8 @@ static void behavior_task(void *arg) {
             behavior_unlock();
         }
 
-        if (should_fallback && fallback_state[0] != '\0') {
-            behavior_state_set(fallback_state);
-        } else {
-            behavior_apply_display_request(&display_request, "behavior task");
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(BEHAVIOR_TICK_MS));
+        behavior_apply_display_request(&display_request, "behavior task");
+        (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(BEHAVIOR_TICK_MS));
     }
 }
 
@@ -1700,8 +1771,16 @@ esp_err_t behavior_state_init(void) {
         return ESP_ERR_NO_MEM;
     }
 
+    s_ctx.request_queue = xQueueCreate(BEHAVIOR_REQUEST_QUEUE_DEPTH, sizeof(behavior_state_request_t));
+    if (s_ctx.request_queue == NULL) {
+        vSemaphoreDelete(s_ctx.lock);
+        memset(&s_ctx, 0, sizeof(s_ctx));
+        return ESP_ERR_NO_MEM;
+    }
+
     task_result = xTaskCreate(behavior_task, "behavior_state", BEHAVIOR_TASK_STACK, NULL, BEHAVIOR_TASK_PRIORITY, &s_ctx.task);
     if (task_result != pdPASS) {
+        vQueueDelete(s_ctx.request_queue);
         vSemaphoreDelete(s_ctx.lock);
         memset(&s_ctx, 0, sizeof(s_ctx));
         return ESP_ERR_NO_MEM;
@@ -1784,9 +1863,7 @@ static esp_err_t behavior_state_set_with_resources_and_action_internal(const cha
                                                                        const char *anim_id,
                                                                        const char *sound_id,
                                                                        const char *action_id) {
-    esp_err_t ret;
-    char resolved_state[BEHAVIOR_STATE_ID_LEN] = {0};
-    behavior_display_request_t display_request;
+    behavior_state_request_t request;
 
     if (state_id == NULL || state_id[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
@@ -1796,18 +1873,8 @@ static esp_err_t behavior_state_set_with_resources_and_action_internal(const cha
         return ESP_FAIL;
     }
 
-    if (!behavior_lock_with_timeout(BEHAVIOR_SET_LOCK_TIMEOUT_MS)) {
-        ESP_LOGW(TAG,
-                 "State request lock timeout state=%s action=%s after %u ms",
-                 state_id,
-                 action_id != NULL ? action_id : "<none>",
-                 (unsigned)BEHAVIOR_SET_LOCK_TIMEOUT_MS);
-        return ESP_ERR_TIMEOUT;
-    }
-
-    behavior_clear_display_request(&display_request);
     ESP_LOGI(TAG,
-             "State request state=%s action=%s text=%s anim_override=%s sound_override=%s font=%d alert=%d",
+             "Queue state request state=%s action=%s text=%s anim_override=%s sound_override=%s font=%d alert=%d",
              state_id,
              action_id != NULL ? action_id : "<none>",
              text != NULL ? text : "<unchanged>",
@@ -1815,21 +1882,9 @@ static esp_err_t behavior_state_set_with_resources_and_action_internal(const cha
              sound_id != NULL ? sound_id : "<default>",
              font_size,
              alert_text ? 1 : 0);
-    ret = behavior_schedule_state_locked(
-        state_id, text, font_size, alert_text, anim_id, sound_id, action_id, &display_request);
-    if (ret == ESP_OK) {
-        behavior_copy_string(resolved_state, sizeof(resolved_state), s_ctx.current_state_id);
-    }
-    behavior_unlock();
-    if (ret == ESP_OK) {
-        behavior_apply_display_request(&display_request, "state request");
-    }
-    if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "State request applied requested=%s resolved=%s", state_id, resolved_state);
-    } else {
-        ESP_LOGW(TAG, "State request failed state=%s err=%s", state_id, esp_err_to_name(ret));
-    }
-    return ret;
+
+    behavior_fill_state_request(&request, state_id, text, font_size, alert_text, anim_id, sound_id, action_id);
+    return behavior_submit_state_request(&request);
 }
 
 esp_err_t behavior_state_set(const char *state_id) {
