@@ -229,21 +229,29 @@ static int commit_pending_playback(void) {
         return -1;
     }
 
-    const lv_img_dsc_t *first_frame = playback_current_descriptor(&g_pending_playback);
-    if (first_frame == NULL) {
+    if (playback_current_descriptor(&g_pending_playback) == NULL) {
         return -1;
     }
-
-    if (g_front_img != NULL) {
-        lv_img_set_src(g_front_img, first_frame);
-        lv_obj_set_style_opa(g_front_img, LV_OPA_COVER, 0);
-    }
-    hide_back_layer();
 
     playback_cleanup(&g_active_playback);
     g_active_playback = g_pending_playback;
     memset(&g_pending_playback, 0, sizeof(g_pending_playback));
     playback_reset_slots(&g_pending_playback);
+
+    const lv_img_dsc_t *active_frame = playback_current_descriptor(&g_active_playback);
+    if (active_frame == NULL) {
+        playback_cleanup(&g_active_playback);
+        g_state = ANIM_PLAYER_IDLE;
+        g_current_type = EMOJI_ANIM_NONE;
+        g_requested_type = EMOJI_ANIM_NONE;
+        return -1;
+    }
+
+    if (g_front_img != NULL) {
+        lv_img_set_src(g_front_img, active_frame);
+        lv_obj_set_style_opa(g_front_img, LV_OPA_COVER, 0);
+    }
+    hide_back_layer();
 
     g_state = ANIM_PLAYER_PLAYING;
     g_current_type = g_active_playback.type;
