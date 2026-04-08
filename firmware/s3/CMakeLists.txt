@@ -41,11 +41,20 @@ else()
     set(ANIM_DEFAULT_FPS 10)
 endif()
 
-set(ANIM_IMPORT_DIR ${CMAKE_SOURCE_DIR}/assets/watcher0327png)
+set(ANIM_GIF_DIR ${CMAKE_SOURCE_DIR}/assets/gif)
+set(ANIM_LEGACY_DIR ${CMAKE_SOURCE_DIR}/assets/watcher0327png)
+set(ANIM_IMPORT_DIR ${ANIM_LEGACY_DIR})
+if(EXISTS "${ANIM_GIF_DIR}")
+    file(GLOB_RECURSE ANIM_GIF_SOURCES CONFIGURE_DEPENDS "${ANIM_GIF_DIR}/*.gif")
+    if(ANIM_GIF_SOURCES)
+        set(ANIM_IMPORT_DIR ${ANIM_GIF_DIR})
+    endif()
+endif()
+
 set(ANIM_OUTPUT_DIR ${CMAKE_SOURCE_DIR}/release/${PROJECT_VER}/sdcard/anim)
 set(ANIM_GENERATOR_ARGS
     --output-dir ${ANIM_OUTPUT_DIR}
-    --import-dir ${ANIM_IMPORT_DIR}
+    --input-dir ${ANIM_IMPORT_DIR}
     --fps ${ANIM_DEFAULT_FPS}
 )
 

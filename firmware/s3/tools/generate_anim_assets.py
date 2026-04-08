@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate SD-card animation assets from GIF sources or legacy PNG sequences.
+Generate SD-card animation assets from a folder of GIF sources or legacy PNG sequences.
 
 Outputs:
   - anim_manifest.bin (v2)
@@ -25,6 +25,13 @@ try:
     from PIL import ImageSequence
 except ImportError as exc:  # pragma: no cover - runtime dependency check
     raise SystemExit("Pillow is required. Install it with: python -m pip install Pillow") from exc
+
+
+PROJECT_VERSION = "v0.1.7"
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+DEFAULT_INPUT_DIR = PROJECT_ROOT / "assets" / "gif"
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "release" / PROJECT_VERSION / "sdcard" / "anim"
 
 
 ANIM_TYPES = [
@@ -131,14 +138,35 @@ def load_gif_frames(path: Path, default_delay_ms: int) -> list[tuple[Image.Image
 
 def load_legacy_png_frames(path: Path, default_delay_ms: int) -> list[tuple[Image.Image, int]]:
     source_frames = sorted(path.glob("*.png"), key=lambda candidate: extract_frame_index(candidate.stem))
-    return [(Image.open(frame).convert("RGBA").copy(), default_delay_ms) for frame in source_frames]
+    frames: list[tuple[Image.Image, int]] = []
+    for frame in source_frames:
+        with Image.open(frame) as image:
+            frames.append((image.convert("RGBA").copy(), default_delay_ms))
+    return frames
+
+
+def resolve_gif_source(import_dir: Path, anim_type: str) -> Path | None:
+    candidate_names = GIF_CANDIDATES.get(anim_type, [])
+    alias_stems = {anim_type.lower()}
+    alias_stems.update(Path(candidate_name).stem.lower() for candidate_name in candidate_names)
+
+    for candidate_name in candidate_names:
+        candidate = import_dir / candidate_name
+        if candidate.is_file():
+            return candidate
+
+    matches = [candidate for candidate in import_dir.rglob("*.gif") if candidate.stem.lower() in alias_stems]
+    if not matches:
+        return None
+
+    matches.sort(key=lambda path: str(path.relative_to(import_dir)).lower())
+    return matches[0]
 
 
 def load_source_frames(import_dir: Path, anim_type: str, default_delay_ms: int) -> list[tuple[Image.Image, int]]:
-    for candidate_name in GIF_CANDIDATES.get(anim_type, []):
-        candidate = import_dir / candidate_name
-        if candidate.is_file():
-            return load_gif_frames(candidate, default_delay_ms)
+    gif_source = resolve_gif_source(import_dir, anim_type)
+    if gif_source is not None:
+        return load_gif_frames(gif_source, default_delay_ms)
 
     legacy_dirs = [name for name, mapped_type in LEGACY_IMPORT_MAP.items() if mapped_type == anim_type]
     for legacy_dir in legacy_dirs:
@@ -207,7 +235,15 @@ def write_animpack(
     }
 
 
-def build_manifest(import_dir: Path, output_dir: Path, default_fps: int, swap_bytes: bool) -> dict[str, int]:
+def build_manifest(
+    import_dir: Path,
+    output_dir: Path,
+    default_fps: int,
+    swap_bytes: bool,
+    clean: bool,
+) -> dict[str, int]:
+    if clean and output_dir.exists():
+        shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     default_delay_ms = max(1, int(round(1000 / max(default_fps, 1))))
 
@@ -248,13 +284,25 @@ def build_manifest(import_dir: Path, output_dir: Path, default_fps: int, swap_by
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-dir", required=True, help="Where generated animpack assets should be written")
     parser.add_argument(
+        "--input-dir",
         "--import-dir",
-        required=True,
+        dest="input_dir",
+        default=str(DEFAULT_INPUT_DIR),
         help="Directory containing GIF sources or legacy PNG animation folders",
     )
+    parser.add_argument(
+        "--output-dir",
+        default=str(DEFAULT_OUTPUT_DIR),
+        help="Where generated animpack assets should be written",
+    )
     parser.add_argument("--fps", type=int, default=10, help="Default FPS stored in manifest entries")
+    parser.add_argument(
+        "--clean",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Remove the output directory contents before generating new assets",
+    )
     parser.add_argument(
         "--lv-color-16-swap",
         action="store_true",
@@ -262,13 +310,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    import_dir = Path(args.import_dir).resolve()
+    import_dir = Path(args.input_dir).resolve()
     output_dir = Path(args.output_dir).resolve()
 
     if not import_dir.is_dir():
         raise SystemExit(f"Import directory does not exist: {import_dir}")
 
-    build_manifest(import_dir, output_dir, args.fps, args.lv_color_16_swap)
+    build_manifest(import_dir, output_dir, args.fps, args.lv_color_16_swap, args.clean)
     return 0
 
 
