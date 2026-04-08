@@ -19,10 +19,10 @@
 #include "driver/ledc.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/portmacro.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "freertos/portmacro.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -165,9 +165,8 @@ static int logical_angle_to_pulse_width_us(servo_axis_t axis, int logical_angle_
         physical_relative_deg = SERVO_LOGICAL_NEUTRAL_DEG;
     }
 
-    pulse_width_us =
-        SERVO_NEUTRAL_PULSE_US +
-        div_round_nearest(physical_relative_deg * SERVO_TRAVEL_FROM_NEUTRAL_US, SERVO_LOGICAL_NEUTRAL_DEG);
+    pulse_width_us = SERVO_NEUTRAL_PULSE_US +
+                     div_round_nearest(physical_relative_deg * SERVO_TRAVEL_FROM_NEUTRAL_US, SERVO_LOGICAL_NEUTRAL_DEG);
 
     if (pulse_width_us < SERVO_MIN_PULSE_US) {
         pulse_width_us = SERVO_MIN_PULSE_US;
@@ -201,13 +200,8 @@ static void servo_log_target_mapping(servo_axis_t axis, int logical_angle_deg, c
     int pulse_width_us = logical_angle_to_pulse_width_us(axis, logical_angle_deg);
     int duty = pulse_width_us_to_duty(pulse_width_us);
 
-    ESP_LOGI(TAG,
-             "Map servo %s axis=%s logical=%d pulse=%dus duty=%d",
-             context != NULL ? context : "target",
-             axis == SERVO_AXIS_X ? "X" : "Y",
-             logical_angle_deg,
-             pulse_width_us,
-             duty);
+    ESP_LOGI(TAG, "Map servo %s axis=%s logical=%d pulse=%dus duty=%d", context != NULL ? context : "target",
+             axis == SERVO_AXIS_X ? "X" : "Y", logical_angle_deg, pulse_width_us, duty);
 }
 
 /**
@@ -282,15 +276,9 @@ static esp_err_t configure_ledc(void) {
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG,
-             "LEDC configured: %dHz, %d-bit, GPIO %d (X), GPIO %d (Y), pulse=%d..%dus neutral=%dus",
-             LEDC_FREQ_HZ,
-             LEDC_DUTY_RES,
-             CONFIG_WATCHER_SERVO_X_GPIO,
-             CONFIG_WATCHER_SERVO_Y_GPIO,
-             SERVO_MIN_PULSE_US,
-             SERVO_MAX_PULSE_US,
-             SERVO_NEUTRAL_PULSE_US);
+    ESP_LOGI(TAG, "LEDC configured: %dHz, %d-bit, GPIO %d (X), GPIO %d (Y), pulse=%d..%dus neutral=%dus", LEDC_FREQ_HZ,
+             LEDC_DUTY_RES, CONFIG_WATCHER_SERVO_X_GPIO, CONFIG_WATCHER_SERVO_Y_GPIO, SERVO_MIN_PULSE_US,
+             SERVO_MAX_PULSE_US, SERVO_NEUTRAL_PULSE_US);
 
     return ESP_OK;
 }
@@ -336,20 +324,12 @@ static void servo_log_enqueue(const servo_cmd_msg_t *cmd) {
     }
 
     if (cmd->type == CMD_TYPE_SINGLE) {
-        ESP_LOGI(TAG,
-                 "Queue servo cmd seq=%lu type=single axis=%s target=%d duration_ms=%d q_depth=%lu",
-                 (unsigned long)cmd->seq_no,
-                 cmd->single.axis == SERVO_AXIS_X ? "X" : "Y",
-                 cmd->single.angle_deg,
-                 cmd->single.duration_ms,
-                 (unsigned long)servo_queue_depth());
+        ESP_LOGI(TAG, "Queue servo cmd seq=%lu type=single axis=%s target=%d duration_ms=%d q_depth=%lu",
+                 (unsigned long)cmd->seq_no, cmd->single.axis == SERVO_AXIS_X ? "X" : "Y", cmd->single.angle_deg,
+                 cmd->single.duration_ms, (unsigned long)servo_queue_depth());
     } else {
-        ESP_LOGI(TAG,
-                 "Queue servo cmd seq=%lu type=sync x=%d y=%d duration_ms=%d q_depth=%lu",
-                 (unsigned long)cmd->seq_no,
-                 cmd->sync.x_deg,
-                 cmd->sync.y_deg,
-                 cmd->sync.duration_ms,
+        ESP_LOGI(TAG, "Queue servo cmd seq=%lu type=sync x=%d y=%d duration_ms=%d q_depth=%lu",
+                 (unsigned long)cmd->seq_no, cmd->sync.x_deg, cmd->sync.y_deg, cmd->sync.duration_ms,
                  (unsigned long)servo_queue_depth());
     }
 }
@@ -360,23 +340,14 @@ static void servo_log_drop(const servo_cmd_msg_t *cmd, const char *reason) {
     }
 
     if (cmd->type == CMD_TYPE_SINGLE) {
-        ESP_LOGW(TAG,
-                 "Drop servo cmd seq=%lu reason=%s axis=%s target=%d duration_ms=%d q_depth=%lu",
-                 (unsigned long)cmd->seq_no,
-                 reason != NULL ? reason : "unknown",
-                 cmd->single.axis == SERVO_AXIS_X ? "X" : "Y",
-                 cmd->single.angle_deg,
-                 cmd->single.duration_ms,
+        ESP_LOGW(TAG, "Drop servo cmd seq=%lu reason=%s axis=%s target=%d duration_ms=%d q_depth=%lu",
+                 (unsigned long)cmd->seq_no, reason != NULL ? reason : "unknown",
+                 cmd->single.axis == SERVO_AXIS_X ? "X" : "Y", cmd->single.angle_deg, cmd->single.duration_ms,
                  (unsigned long)servo_queue_depth());
     } else {
-        ESP_LOGW(TAG,
-                 "Drop servo cmd seq=%lu reason=%s x=%d y=%d duration_ms=%d q_depth=%lu",
-                 (unsigned long)cmd->seq_no,
-                 reason != NULL ? reason : "unknown",
-                 cmd->sync.x_deg,
-                 cmd->sync.y_deg,
-                 cmd->sync.duration_ms,
-                 (unsigned long)servo_queue_depth());
+        ESP_LOGW(TAG, "Drop servo cmd seq=%lu reason=%s x=%d y=%d duration_ms=%d q_depth=%lu",
+                 (unsigned long)cmd->seq_no, reason != NULL ? reason : "unknown", cmd->sync.x_deg, cmd->sync.y_deg,
+                 cmd->sync.duration_ms, (unsigned long)servo_queue_depth());
     }
 }
 
@@ -391,22 +362,13 @@ static void servo_log_execute_start(const servo_cmd_msg_t *cmd) {
     if (cmd->type == CMD_TYPE_SINGLE) {
         ESP_LOGI(TAG,
                  "Start servo cmd seq=%lu type=single axis=%s target=%d duration_ms=%d queued_ms=%lu q_remaining=%lu",
-                 (unsigned long)cmd->seq_no,
-                 cmd->single.axis == SERVO_AXIS_X ? "X" : "Y",
-                 cmd->single.angle_deg,
-                 cmd->single.duration_ms,
-                 (unsigned long)waited_ms,
-                 (unsigned long)servo_queue_depth());
+                 (unsigned long)cmd->seq_no, cmd->single.axis == SERVO_AXIS_X ? "X" : "Y", cmd->single.angle_deg,
+                 cmd->single.duration_ms, (unsigned long)waited_ms, (unsigned long)servo_queue_depth());
         servo_log_target_mapping(cmd->single.axis, cmd->single.angle_deg, "cmd");
     } else {
-        ESP_LOGI(TAG,
-                 "Start servo cmd seq=%lu type=sync x=%d y=%d duration_ms=%d queued_ms=%lu q_remaining=%lu",
-                 (unsigned long)cmd->seq_no,
-                 cmd->sync.x_deg,
-                 cmd->sync.y_deg,
-                 cmd->sync.duration_ms,
-                 (unsigned long)waited_ms,
-                 (unsigned long)servo_queue_depth());
+        ESP_LOGI(TAG, "Start servo cmd seq=%lu type=sync x=%d y=%d duration_ms=%d queued_ms=%lu q_remaining=%lu",
+                 (unsigned long)cmd->seq_no, cmd->sync.x_deg, cmd->sync.y_deg, cmd->sync.duration_ms,
+                 (unsigned long)waited_ms, (unsigned long)servo_queue_depth());
         servo_log_target_mapping(SERVO_AXIS_X, cmd->sync.x_deg, "sync-x");
         servo_log_target_mapping(SERVO_AXIS_Y, cmd->sync.y_deg, "sync-y");
     }
@@ -420,14 +382,9 @@ static void servo_log_execute_done(const servo_cmd_msg_t *cmd, uint32_t exec_ms)
         return;
     }
 
-    ESP_LOGI(TAG,
-             "Done servo cmd seq=%lu type=%s exec_ms=%lu final={x=%d y=%d} q_depth=%lu",
-             (unsigned long)cmd->seq_no,
-             cmd->type == CMD_TYPE_SINGLE ? "single" : "sync",
-             (unsigned long)exec_ms,
-             current_x,
-             current_y,
-             (unsigned long)servo_queue_depth());
+    ESP_LOGI(TAG, "Done servo cmd seq=%lu type=%s exec_ms=%lu final={x=%d y=%d} q_depth=%lu",
+             (unsigned long)cmd->seq_no, cmd->type == CMD_TYPE_SINGLE ? "single" : "sync", (unsigned long)exec_ms,
+             current_x, current_y, (unsigned long)servo_queue_depth());
 }
 
 /**
@@ -481,11 +438,8 @@ static void servo_task(void *arg) {
 
             /* Skip if already at target */
             if (start_deg == target_deg) {
-                ESP_LOGI(TAG,
-                         "Skip servo cmd seq=%lu axis=%s already at target=%d",
-                         (unsigned long)cmd.seq_no,
-                         axis == SERVO_AXIS_X ? "X" : "Y",
-                         target_deg);
+                ESP_LOGI(TAG, "Skip servo cmd seq=%lu axis=%s already at target=%d", (unsigned long)cmd.seq_no,
+                         axis == SERVO_AXIS_X ? "X" : "Y", target_deg);
                 servo_log_execute_done(&cmd, servo_now_ms() - exec_started_ms);
                 continue;
             }
@@ -687,11 +641,8 @@ esp_err_t hal_servo_move_smooth(servo_axis_t axis, int angle_deg, int duration_m
 
     /* For zero duration, use immediate move */
     if (duration_ms <= 0) {
-        ESP_LOGI(TAG,
-                 "Immediate servo cmd type=single axis=%s target=%d duration_ms=%d",
-                 axis == SERVO_AXIS_X ? "X" : "Y",
-                 angle_deg,
-                 duration_ms);
+        ESP_LOGI(TAG, "Immediate servo cmd type=single axis=%s target=%d duration_ms=%d",
+                 axis == SERVO_AXIS_X ? "X" : "Y", angle_deg, duration_ms);
         return hal_servo_set_angle(axis, angle_deg);
     }
 
