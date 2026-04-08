@@ -79,6 +79,28 @@ idf.py build
 idf.py -p COM3 flash monitor
 ```
 
+### Windows Release ZIP Flasher
+
+For packaged Windows flashing without entering the ESP-IDF build flow:
+
+```powershell
+cd D:\GithubRep\WatcheRobot-Firmware
+python -m pip install -r tools\win_flasher\requirements.txt
+tools\flash-release.cmd
+```
+
+This CLI scans `firmware\s3\release\` for the newest release ZIP, lets you choose a COM port, parses `flash_args.txt`, and flashes the package with `esptool`.
+
+Useful commands:
+
+```powershell
+python -m tools.win_flasher list-releases
+python -m tools.win_flasher list-ports
+python -m tools.win_flasher flash --port COM41
+```
+
+Full usage is documented in [docs/development/windows-release-flasher.md](docs/development/windows-release-flasher.md).
+
 ### 4. Start the Cloud Server
 
 ```bash
@@ -164,6 +186,7 @@ WatcheRobot-Firmware/
 | [docs/development/known-issues.md](docs/development/known-issues.md) | Known issues & workarounds |
 | [docs/development/testing.md](docs/development/testing.md) | Testing guide |
 | [docs/development/codex-multi-device-workflow.md](docs/development/codex-multi-device-workflow.md) | Codex lane workflow for multi-feature / multi-device development |
+| [docs/development/windows-release-flasher.md](docs/development/windows-release-flasher.md) | Windows CLI flasher for packaged release ZIP files |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
 
