@@ -3,8 +3,8 @@
 This toolchain converts a folder of GIF animation sources into SD-card ready
 animation assets:
 
-- `release/v0.1.7/sdcard/anim/anim_manifest.bin`
-- `release/v0.1.7/sdcard/anim/<type>.animpack`
+- `release/v0.2.0-alpha/sdcard/anim/anim_manifest.bin`
+- `release/v0.2.0-alpha/sdcard/anim/<type>.animpack`
 
 ## Source Layout
 
@@ -36,7 +36,7 @@ transition period.
 From `firmware/s3`:
 
 ```powershell
-python tools/generate_anim_assets.py --input-dir assets/gif --output-dir release/v0.1.7/sdcard/anim --clean
+python tools/generate_anim_assets.py --input-dir assets/gif --output-dir release/v0.2.0-alpha/sdcard/anim --clean
 ```
 
 If you only want the default project paths, the command can be shortened to:
@@ -49,7 +49,7 @@ Useful options:
 
 ```powershell
 python tools/generate_anim_assets.py --fps 10 --clean
-python tools/generate_anim_assets.py --input-dir assets/gif --output-dir release/v0.1.7/sdcard/anim
+python tools/generate_anim_assets.py --input-dir assets/gif --output-dir release/v0.2.0-alpha/sdcard/anim
 python tools/generate_anim_assets.py --lv-color-16-swap
 ```
 
@@ -101,12 +101,14 @@ The SD-card root should end up with this layout:
   present.
 - The current branch requires FATFS long file name support because
   `anim_manifest.bin` and `*.animpack` exceed 8.3 naming.
+- The current `v0.2.0-alpha` validation bundle focuses on the runtime pipeline;
+  final per-state animation and action content may still be placeholder data.
 
 ## Troubleshooting
 
 - `Anim manifest missing`
   - Confirm the SD card contains `anim/anim_manifest.bin` at the card root.
-  - Confirm the generated files were copied from `release/v0.1.7/sdcard/anim/`.
+  - Confirm the generated files were copied from `release/v0.2.0-alpha/sdcard/anim/`.
 - `No SD animation manifest available under /sdcard/anim`
   - Usually means the generated files were copied to the wrong directory or the
     wrong SD card was inserted.

@@ -2,6 +2,13 @@
 
 This document remains the architecture baseline for the refactor.
 
+Current release note:
+
+- `v0.2.0-alpha` validates the runtime architecture and packaging flow.
+- Final per-state animation and action content are not fully refreshed yet.
+- Several animation states in the current alpha package intentionally reuse the
+  same placeholder GIF.
+
 For the current validated branch state, day-to-day workflow, and next steps, see
 also:
 

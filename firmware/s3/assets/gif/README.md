@@ -28,7 +28,14 @@ python tools/sync_anim_sdcard.py --target-root F:\
 
 Generated output is written to:
 
-- `release/v0.1.7/sdcard/anim/`
+- `release/v0.2.0-alpha/sdcard/anim/`
+
+Current alpha note:
+
+- The runtime pipeline is the target of this release.
+- Final per-state animation and action data are not all refreshed yet.
+- Several animation states currently reuse the same placeholder GIF during
+  alpha validation.
 
 For the full branch guide and roadmap, see:
 

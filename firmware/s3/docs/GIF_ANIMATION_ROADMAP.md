@@ -20,8 +20,20 @@ The current branch baseline is complete and validated for:
 - Fix the transient blank frame / `No data` issue during animation switches.
 - Restore the UI text overlay so text remains readable above the active GIF.
 
-## Phase 2: Next
+## Phase 2: Release Packaging Completed
 
+- Promote the GIF / AnimPack branch baseline into the `v0.2.0-alpha` release track.
+- Package firmware flash binaries and SD-card animation assets as separate
+  deliverables under `release/v0.2.0-alpha/`.
+- Refresh top-level release documentation so `v0.2.0-alpha` is the current
+  baseline for validation and distribution.
+
+## Phase 3: Next
+
+- Replace the placeholder alpha animation set so each runtime state and action
+  path no longer reuses the same GIF source.
+- Refresh action data alongside the final animation pack so behavior playback
+  matches the new GIF-authored state set.
 - Add a single branch-level asset configuration file so FPS, loop policy, and
   optional aliases are not encoded only in script defaults.
 - Improve runtime diagnostics for missing or malformed `animpack` files with
@@ -31,16 +43,14 @@ The current branch baseline is complete and validated for:
 - Decide whether `anim_meta.json` should remain optional or become a generated
   artifact in the toolchain.
 
-## Phase 3: Robustness
+## Phase 4: Robustness
 
 - Add explicit SPI2 arbitration if the AI / SSCMA camera path is re-enabled in
   normal runtime scenarios.
-- Add release packaging for `release/v0.1.7/sdcard/anim` so the output can be
-  zipped or copied as a single deliverable.
 - Add stronger asset validation, including frame-size mismatches, unsupported
   GIF inputs, and manifest / pack consistency checks.
 
-## Phase 4: Future Optimization
+## Phase 5: Future Optimization
 
 - Evaluate optional per-frame independent compression if SD footprint becomes a
   practical problem.

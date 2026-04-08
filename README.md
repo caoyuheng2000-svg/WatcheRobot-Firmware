@@ -22,14 +22,15 @@ WatcheRobot is an open-source AI assistant robot built on the **SenseCAP Watcher
 
 ### Current Release Track
 
-- Current release target: `v0.1.7`
-- `v0.1.7` is the recommended baseline for validating the latest reconnect stability and UI state consistency fixes on the ESP32-S3 mainline:
-  - BLE-to-WebSocket recovery now puts less pressure on runtime memory during reconnect storms
-  - Display text and font changes stay aligned more reliably with behavior-state updates and WebSocket events
-  - UI state transitions are less likely to drift when local state changes and cloud-driven state changes arrive close together
-  - The branch still includes the animation, Bluetooth feedback, cached WebSocket resume, and audio recovery improvements from `v0.1.6`
-- This release is suitable for repeated validation of reconnect stability, state handoff, on-screen text behavior, and mixed local/cloud UI transitions
-- BLE / Wi-Fi, cloud voice, animation, and local expression playback remain integrated on the same mainline, and `v0.1.7` should be treated as the current release package for regression and feature validation
+- Current release target: `v0.2.0-alpha`
+- `v0.2.0-alpha` is the recommended alpha baseline for validating the new GIF-authored animation system on the ESP32-S3 mainline:
+  - PNG-sequence runtime playback has been replaced by SD-backed `animpack` streaming generated from GIF source assets
+  - Boot animation now runs from `/sdcard/anim/boot.animpack`, and missing SD animation resources fail into a deterministic boot error path
+  - UI text remains visible above animated backgrounds, and runtime GIF switches no longer flash white or show `No data`
+  - The branch still carries the reconnect hardening, Bluetooth feedback, cached WebSocket resume, and audio recovery work from `v0.1.7`
+- This alpha release is suitable for repeated validation of SD-backed animation startup, on-screen text behavior, runtime state switching, and mixed local/cloud UI transitions
+- Final action and animation content are not fully refreshed yet; several runtime states currently reuse the same placeholder GIF during alpha verification
+- Release deliverables now include both a firmware flash bundle and an SD-card animation asset bundle under `firmware/s3/release/v0.2.0-alpha`
 
 ---
 

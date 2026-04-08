@@ -11,6 +11,32 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.2.0-alpha] - 2026-04-08
+
+### Added
+- GIF-to-AnimPack asset toolchain for generating SD-card animation assets from `firmware/s3/assets/gif`
+- SD-card animation sync helper for mirroring generated `animpack` files and `anim_manifest.bin` onto removable media
+- Release packaging for both firmware flash binaries and SD-backed animation assets
+
+### Fixed
+- SD mount failures now return into the boot fatal-error path instead of aborting and rebooting immediately
+- FATFS long filename support is enabled so `anim_manifest.bin` and `*.animpack` resolve correctly on SD
+- UI text once again renders above animated backgrounds during boot and runtime state changes
+- GIF animation switches no longer flash white or show `No data` due to descriptor lifetime issues
+
+### Changed
+- Firmware version is now tracked as `v0.2.0-alpha`
+- Runtime animation playback now streams full-frame RGB565 `animpack` payloads from SD instead of caching decoded PNG-sequence frames in RAM
+- Boot animation is now part of the SD-backed animation pipeline and requires the generated `/sdcard/anim` asset set
+- Current release packaging and documentation are aligned around the GIF / AnimPack animation architecture
+
+### Notes
+- Release focus: the GIF-authored animation pipeline, SD-backed boot/runtime playback, and UI overlay stability
+- This is an alpha content baseline; final action data and per-state animation assets are not fully refreshed yet
+- `v0.2.0-alpha` is the recommended package for validating animation startup, state switching, and SD asset deployment together
+
+---
+
 ## [0.1.7] - 2026-04-08
 
 ### Fixed
