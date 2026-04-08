@@ -45,6 +45,17 @@ If you only want the default project paths, the command can be shortened to:
 python tools/generate_anim_assets.py
 ```
 
+## Copy To SD
+
+To mirror the generated assets onto an SD-card root such as `F:\`:
+
+```powershell
+python tools/sync_anim_sdcard.py --target-root F:\
+```
+
+This copies the generated assets into `F:\anim` and verifies the result with
+hash comparisons.
+
 ## Output Rules
 
 - The output directory is recreated when `--clean` is enabled.
