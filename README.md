@@ -27,10 +27,11 @@ WatcheRobot is an open-source AI assistant robot built on the **SenseCAP Watcher
   - PNG-sequence runtime playback has been replaced by SD-backed `animpack` streaming generated from GIF source assets
   - Boot animation now runs from `/sdcard/anim/boot.animpack`, and missing SD animation resources fail into a deterministic boot error path
   - UI text remains visible above animated backgrounds, and runtime GIF switches no longer flash white or show `No data`
-  - The branch still carries the reconnect hardening, Bluetooth feedback, cached WebSocket resume, and audio recovery work from `v0.1.7`
+  - The branch still carries the reconnect hardening, Bluetooth feedback, cached WebSocket resume, audio recovery work from `v0.1.7`, and the packaged Windows flashing workflow added on main in `v0.1.8`
 - This alpha release is suitable for repeated validation of SD-backed animation startup, on-screen text behavior, runtime state switching, and mixed local/cloud UI transitions
 - Final action and animation content are not fully refreshed yet; several runtime states currently reuse the same placeholder GIF during alpha verification
 - Release deliverables now include both a firmware flash bundle and an SD-card animation asset bundle under `firmware/s3/release/v0.2.0-alpha`
+- Windows release ZIP flashing remains available through `tools\flash-release.cmd` and `tools\win_flasher` for packaged validation workflows
 
 ---
 
@@ -79,6 +80,28 @@ idf.py set-target esp32s3
 idf.py build
 idf.py -p COM3 flash monitor
 ```
+
+### Windows Release ZIP Flasher
+
+For packaged Windows flashing without entering the ESP-IDF build flow:
+
+```powershell
+cd D:\GithubRep\WatcheRobot-Firmware
+python -m pip install -r tools\win_flasher\requirements.txt
+tools\flash-release.cmd
+```
+
+This CLI scans `firmware\s3\release\` for the newest release ZIP, lets you choose a COM port, parses `flash_args.txt`, and flashes the package with `esptool`.
+
+Useful commands:
+
+```powershell
+python -m tools.win_flasher list-releases
+python -m tools.win_flasher list-ports
+python -m tools.win_flasher flash --port COM41
+```
+
+Full usage is documented in [docs/development/windows-release-flasher.md](docs/development/windows-release-flasher.md).
 
 ### 4. Start the Cloud Server
 
@@ -165,6 +188,7 @@ WatcheRobot-Firmware/
 | [docs/development/known-issues.md](docs/development/known-issues.md) | Known issues & workarounds |
 | [docs/development/testing.md](docs/development/testing.md) | Testing guide |
 | [docs/development/codex-multi-device-workflow.md](docs/development/codex-multi-device-workflow.md) | Codex lane workflow for multi-feature / multi-device development |
+| [docs/development/windows-release-flasher.md](docs/development/windows-release-flasher.md) | Windows CLI flasher for packaged release ZIP files |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
 

@@ -37,6 +37,22 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.1.8] - 2026-04-08
+
+### Added
+- Windows-first packaged release flasher under `tools/win_flasher` for scanning release ZIPs, selecting COM ports, and flashing with `esptool`
+- Dedicated Windows release flasher documentation covering install, interactive usage, non-interactive commands, and common troubleshooting
+
+### Changed
+- Firmware version is now tracked as `v0.1.8`
+- Current release packaging now includes the new Windows release ZIP flashing workflow and updated usage docs
+
+### Notes
+- Release focus: packaged Windows flashing and release validation workflow
+- Runtime firmware baseline remains aligned with the latest `v0.1.7` mainline behavior fixes
+
+---
+
 ## [0.1.7] - 2026-04-08
 
 ### Fixed

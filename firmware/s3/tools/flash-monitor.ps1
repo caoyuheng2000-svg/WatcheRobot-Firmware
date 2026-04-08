@@ -256,7 +256,6 @@ function Invoke-BoundedMonitor {
         [Parameter(Mandatory = $true)]
         [string]$ResolvedPort,
 
-        [Parameter(Mandatory = $true)]
         [string]$ResolvedBuildPath,
 
         [Parameter(Mandatory = $true)]

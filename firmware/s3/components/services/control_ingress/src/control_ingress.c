@@ -36,16 +36,6 @@ typedef struct {
 static QueueHandle_t s_state_queue = NULL;
 static TaskHandle_t s_state_task = NULL;
 
-static bool control_ai_status_equals(const control_ai_status_request_t *a, const control_ai_status_request_t *b) {
-    if (a == NULL || b == NULL) {
-        return false;
-    }
-
-    return strcmp(a->status, b->status) == 0 && strcmp(a->message, b->message) == 0 &&
-           strcmp(a->image_name, b->image_name) == 0 && strcmp(a->action_file, b->action_file) == 0 &&
-           strcmp(a->sound_file, b->sound_file) == 0;
-}
-
 static bool control_contains_nocase(const char *haystack, const char *needle) {
     size_t needle_len;
 
@@ -98,9 +88,7 @@ static void control_normalize_resource_name(const char *raw, char *out, size_t o
     out[len] = '\0';
 }
 
-static bool control_append_state_candidate(const char **candidates,
-                                           size_t *count,
-                                           size_t max_count,
+static bool control_append_state_candidate(const char **candidates, size_t *count, size_t max_count,
                                            const char *candidate) {
     size_t i;
 
@@ -180,8 +168,7 @@ static esp_err_t control_apply_ai_status(const control_ai_status_request_t *req)
     control_normalize_resource_name(req->status, status_state_id, sizeof(status_state_id));
     control_normalize_resource_name(req->image_name, image_name, sizeof(image_name));
     control_normalize_resource_name(req->sound_file, sound_id, sizeof(sound_id));
-    control_normalize_resource_name(control_ai_status_to_fallback(req->status, req->message),
-                                    fallback_state_id,
+    control_normalize_resource_name(control_ai_status_to_fallback(req->status, req->message), fallback_state_id,
                                     sizeof(fallback_state_id));
 
     text = req->message[0] != '\0' ? req->message : NULL;
@@ -201,28 +188,20 @@ static esp_err_t control_apply_ai_status(const control_ai_status_request_t *req)
     }
 
     for (i = 0; i < state_candidate_count; ++i) {
-        ret = behavior_state_set_with_resources_and_action(state_candidates[i],
-                                                           text,
-                                                           0,
+        ret = behavior_state_set_with_resources_and_action(state_candidates[i], text, 0,
                                                            image_name[0] != '\0' ? image_name : NULL,
-                                                           sound_id[0] != '\0' ? sound_id : NULL,
-                                                           selected_action_id);
+                                                           sound_id[0] != '\0' ? sound_id : NULL, selected_action_id);
         if (ret != ESP_ERR_NOT_FOUND) {
             break;
         }
     }
 
     if (ret == ESP_ERR_NOT_FOUND) {
-        ret = behavior_state_set_with_resources_and_action("standby",
-                                                           text,
-                                                           0,
-                                                           image_name[0] != '\0' ? image_name : NULL,
-                                                           sound_id[0] != '\0' ? sound_id : NULL,
-                                                           selected_action_id);
+        ret =
+            behavior_state_set_with_resources_and_action("standby", text, 0, image_name[0] != '\0' ? image_name : NULL,
+                                                         sound_id[0] != '\0' ? sound_id : NULL, selected_action_id);
         if (ret == ESP_ERR_NOT_FOUND) {
-            ESP_LOGW(TAG,
-                     "No local match for AI status=%s action=%s fallback=%s image=%s",
-                     req->status,
+            ESP_LOGW(TAG, "No local match for AI status=%s action=%s fallback=%s image=%s", req->status,
                      action_state_id[0] != '\0' ? action_state_id : "<none>",
                      fallback_state_id[0] != '\0' ? fallback_state_id : "<none>",
                      image_name[0] != '\0' ? image_name : "<none>");
@@ -242,8 +221,6 @@ static esp_err_t control_apply_ai_status(const control_ai_status_request_t *req)
 
 static void control_state_task(void *arg) {
     control_state_msg_t msg;
-    control_ai_status_request_t last_ai_status = {0};
-    bool last_ai_status_valid = false;
 
     (void)arg;
 
@@ -253,61 +230,46 @@ static void control_state_task(void *arg) {
         }
 
         switch (msg.type) {
-            case CONTROL_STATE_MSG_AI_STATUS: {
-                esp_err_t ret;
+        case CONTROL_STATE_MSG_AI_STATUS: {
+            esp_err_t ret = control_apply_ai_status(&msg.data.ai_status);
+            if (ret != ESP_OK && ret != ESP_ERR_NOT_FOUND) {
+                ESP_LOGW(TAG, "AI status task apply failed: status=%s err=%s", msg.data.ai_status.status,
+                         esp_err_to_name(ret));
+            }
+            break;
+        }
 
-                if (last_ai_status_valid && control_ai_status_equals(&last_ai_status, &msg.data.ai_status)) {
-                    ESP_LOGI(TAG,
-                             "Suppress duplicate AI status: status=%s image=%s action=%s sound=%s",
-                             msg.data.ai_status.status,
-                             msg.data.ai_status.image_name[0] != '\0' ? msg.data.ai_status.image_name : "<none>",
-                             msg.data.ai_status.action_file[0] != '\0' ? msg.data.ai_status.action_file : "<none>",
-                             msg.data.ai_status.sound_file[0] != '\0' ? msg.data.ai_status.sound_file : "<none>");
-                    break;
-                }
+        case CONTROL_STATE_MSG_STATE_SET: {
+            esp_err_t ret = behavior_state_set(msg.data.state_set.state_id);
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "State set failed: state=%s err=%s", msg.data.state_set.state_id, esp_err_to_name(ret));
+            }
+            break;
+        }
 
-                ret = control_apply_ai_status(&msg.data.ai_status);
-                if (ret == ESP_OK || ret == ESP_ERR_NOT_FOUND) {
-                    last_ai_status = msg.data.ai_status;
-                    last_ai_status_valid = true;
-                }
-                break;
+        case CONTROL_STATE_MSG_STATE_TEXT: {
+            const char *text = msg.data.state_text.text[0] != '\0' ? msg.data.state_text.text : NULL;
+            esp_err_t ret;
+
+            if (msg.data.state_text.state_id[0] != '\0') {
+                ret = behavior_state_set_with_text(msg.data.state_text.state_id, text, msg.data.state_text.font_size);
+            } else if (text != NULL) {
+                ret = behavior_state_set_text(text, msg.data.state_text.font_size);
+            } else {
+                ret = ESP_ERR_INVALID_ARG;
             }
 
-            case CONTROL_STATE_MSG_STATE_SET: {
-                esp_err_t ret = behavior_state_set(msg.data.state_set.state_id);
-                last_ai_status_valid = false;
-                if (ret != ESP_OK) {
-                    ESP_LOGW(TAG, "State set failed: state=%s err=%s", msg.data.state_set.state_id, esp_err_to_name(ret));
-                }
-                break;
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "State text apply failed: state=%s err=%s",
+                         msg.data.state_text.state_id[0] != '\0' ? msg.data.state_text.state_id : "<none>",
+                         esp_err_to_name(ret));
             }
+            break;
+        }
 
-            case CONTROL_STATE_MSG_STATE_TEXT: {
-                const char *text = msg.data.state_text.text[0] != '\0' ? msg.data.state_text.text : NULL;
-                esp_err_t ret;
-                last_ai_status_valid = false;
-
-                if (msg.data.state_text.state_id[0] != '\0') {
-                    ret = behavior_state_set_with_text(msg.data.state_text.state_id, text, msg.data.state_text.font_size);
-                } else if (text != NULL) {
-                    ret = behavior_state_set_text(text, msg.data.state_text.font_size);
-                } else {
-                    ret = ESP_ERR_INVALID_ARG;
-                }
-
-                if (ret != ESP_OK) {
-                    ESP_LOGW(TAG,
-                             "State text apply failed: state=%s err=%s",
-                             msg.data.state_text.state_id[0] != '\0' ? msg.data.state_text.state_id : "<none>",
-                             esp_err_to_name(ret));
-                }
-                break;
-            }
-
-            default:
-                ESP_LOGW(TAG, "Unknown control state msg: %d", (int)msg.type);
-                break;
+        default:
+            ESP_LOGW(TAG, "Unknown control state msg: %d", (int)msg.type);
+            break;
         }
     }
 }
@@ -336,11 +298,7 @@ esp_err_t control_ingress_init(void) {
         return ESP_ERR_NO_MEM;
     }
 
-    if (xTaskCreate(control_state_task,
-                    "control_state",
-                    CONTROL_STATE_TASK_STACK,
-                    NULL,
-                    CONTROL_STATE_TASK_PRIORITY,
+    if (xTaskCreate(control_state_task, "control_state", CONTROL_STATE_TASK_STACK, NULL, CONTROL_STATE_TASK_PRIORITY,
                     &s_state_task) != pdPASS) {
         vQueueDelete(s_state_queue);
         s_state_queue = NULL;
@@ -373,8 +331,7 @@ esp_err_t control_ingress_submit_servo(const control_servo_request_t *req) {
         return hal_servo_move_sync(req->x_deg, req->y_deg, req->duration_ms);
     }
 
-    return hal_servo_move_smooth(req->has_x ? SERVO_AXIS_X : SERVO_AXIS_Y,
-                                 req->has_x ? req->x_deg : req->y_deg,
+    return hal_servo_move_smooth(req->has_x ? SERVO_AXIS_X : SERVO_AXIS_Y, req->has_x ? req->x_deg : req->y_deg,
                                  req->duration_ms);
 }
 
