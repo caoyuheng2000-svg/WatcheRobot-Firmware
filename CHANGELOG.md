@@ -11,6 +11,23 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.1.7] - 2026-04-08
+
+### Fixed
+- BLE-to-WebSocket recovery memory storms are reduced during reconnect and runtime handoff
+- Display text and font updates stay in sync more reliably with behavior state and WebSocket-driven UI changes
+- UI state transitions are more resilient when local state updates and cloud state updates overlap
+
+### Changed
+- Firmware version is now tracked as `v0.1.7`
+- Current release baseline now includes the merged BLE/WS recovery hardening and the latest UI state synchronization fixes from `main`
+
+### Notes
+- Release focus: BLE/WS recovery stability and UI state consistency
+- `v0.1.7` is the recommended package for validating reconnect stability, state handoff, and on-screen text behavior together
+
+---
+
 ## [0.1.6] - 2026-04-03
 
 ### Added

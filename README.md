@@ -22,15 +22,14 @@ WatcheRobot is an open-source AI assistant robot built on the **SenseCAP Watcher
 
 ### Current Release Track
 
-- Current release target: `v0.1.6`
-- `v0.1.6` is the recommended baseline for validating the current animation, action, Bluetooth feedback, and cloud-audio recovery flow on the ESP32-S3 mainline:
-  - A dedicated Bluetooth feedback state is now available with its own animation pack and local Bluetooth sound
-  - TTS playback recovers more reliably after audio-path drops or temporary handoff failures
-  - After BLE disconnect, the device now tries the last known good WebSocket endpoint before starting a new UDP discovery round
-  - If the cached endpoint cannot reconnect in time, the firmware falls back to the normal discovery path automatically
-  - Speaking and thinking SPIFFS action curves are updated for smoother motion during expression playback
-- This release is suitable for repeated validation of Bluetooth state feedback, TTS recovery, startup transitions, action triggering, and mixed local/cloud behavior handoff
-- BLE / Wi-Fi, cloud voice, and local expression playback remain integrated on the same mainline, and `v0.1.6` should be treated as the current release package for joint regression and feature validation
+- Current release target: `v0.1.7`
+- `v0.1.7` is the recommended baseline for validating the latest reconnect stability and UI state consistency fixes on the ESP32-S3 mainline:
+  - BLE-to-WebSocket recovery now puts less pressure on runtime memory during reconnect storms
+  - Display text and font changes stay aligned more reliably with behavior-state updates and WebSocket events
+  - UI state transitions are less likely to drift when local state changes and cloud-driven state changes arrive close together
+  - The branch still includes the animation, Bluetooth feedback, cached WebSocket resume, and audio recovery improvements from `v0.1.6`
+- This release is suitable for repeated validation of reconnect stability, state handoff, on-screen text behavior, and mixed local/cloud UI transitions
+- BLE / Wi-Fi, cloud voice, animation, and local expression playback remain integrated on the same mainline, and `v0.1.7` should be treated as the current release package for regression and feature validation
 
 ---
 
