@@ -204,7 +204,8 @@ static esp_err_t sfx_manifest_load_locked(void) {
         }
 
         sfx_copy_string(manifest.entries[manifest.count].id, sizeof(manifest.entries[manifest.count].id), item->string);
-        sfx_normalize_path(path_value, manifest.entries[manifest.count].path, sizeof(manifest.entries[manifest.count].path));
+        sfx_normalize_path(path_value, manifest.entries[manifest.count].path,
+                           sizeof(manifest.entries[manifest.count].path));
         manifest.count++;
     }
 
@@ -251,11 +252,8 @@ static void sfx_set_local_busy(bool busy) {
     sfx_unlock();
 }
 
-static esp_err_t sfx_load_audio_blob(const char *sound_id,
-                                     const char *sound_path,
-                                     uint8_t **audio_data,
-                                     size_t *audio_size,
-                                     bool *loaded_in_psram) {
+static esp_err_t sfx_load_audio_blob(const char *sound_id, const char *sound_path, uint8_t **audio_data,
+                                     size_t *audio_size, bool *loaded_in_psram) {
     FILE *file = NULL;
     long file_size = 0;
     uint8_t *buffer = NULL;
@@ -285,11 +283,8 @@ static esp_err_t sfx_load_audio_blob(const char *sound_id,
 
     if ((size_t)file_size > SFX_PREFETCH_LIMIT_BYTES) {
         fclose(file);
-        ESP_LOGW(TAG,
-                 "Local sfx '%s' is %u bytes, exceeding prefetch limit %u, keeping streaming fallback",
-                 sound_id,
-                 (unsigned int)file_size,
-                 (unsigned int)SFX_PREFETCH_LIMIT_BYTES);
+        ESP_LOGW(TAG, "Local sfx '%s' is %u bytes, exceeding prefetch limit %u, keeping streaming fallback", sound_id,
+                 (unsigned int)file_size, (unsigned int)SFX_PREFETCH_LIMIT_BYTES);
         return ESP_ERR_NOT_SUPPORTED;
     }
 
@@ -316,7 +311,8 @@ static esp_err_t sfx_load_audio_blob(const char *sound_id,
     return ESP_OK;
 }
 
-static bool sfx_playback_buffered(const char *sound_id, uint32_t generation, const uint8_t *audio_data, size_t audio_size) {
+static bool sfx_playback_buffered(const char *sound_id, uint32_t generation, const uint8_t *audio_data,
+                                  size_t audio_size) {
     uint8_t staging[SFX_STREAM_CHUNK_SIZE];
     size_t offset = 0U;
 
@@ -409,12 +405,11 @@ static void sfx_playback_file(const char *sound_id, uint32_t generation) {
             sfx_set_local_busy(false);
             return;
         }
-        ESP_LOGW(TAG,
-                 "Playing local sfx '%s' with streaming fallback (reason=%s)",
-                 sound_id,
+        ESP_LOGW(TAG, "Playing local sfx '%s' with streaming fallback (reason=%s)", sound_id,
                  preload_ret == ESP_ERR_NO_MEM ? "no_mem" : "too_large");
     } else {
-        ESP_LOGW(TAG, "Failed to preload local sfx '%s' from %s: %s", sound_id, sound_path, esp_err_to_name(preload_ret));
+        ESP_LOGW(TAG, "Failed to preload local sfx '%s' from %s: %s", sound_id, sound_path,
+                 esp_err_to_name(preload_ret));
         sfx_set_local_busy(false);
         return;
     }
@@ -445,19 +440,11 @@ static void sfx_playback_file(const char *sound_id, uint32_t generation) {
 
     audio_started = true;
     if (use_prefetched_audio) {
-        ESP_LOGI(TAG,
-                 "Playing local sfx '%s' from %s via %s prefetch (%u bytes, chunk=%u)",
-                 sound_id,
-                 sound_path,
-                 loaded_in_psram ? "psram" : "heap",
-                 (unsigned int)audio_size,
-                 (unsigned int)SFX_STREAM_CHUNK_SIZE);
+        ESP_LOGI(TAG, "Playing local sfx '%s' from %s via %s prefetch (%u bytes, chunk=%u)", sound_id, sound_path,
+                 loaded_in_psram ? "psram" : "heap", (unsigned int)audio_size, (unsigned int)SFX_STREAM_CHUNK_SIZE);
         sfx_playback_buffered(sound_id, generation, audio_data, audio_size);
     } else {
-        ESP_LOGI(TAG,
-                 "Playing local sfx '%s' from %s via streaming fallback (chunk=%u)",
-                 sound_id,
-                 sound_path,
+        ESP_LOGI(TAG, "Playing local sfx '%s' from %s via streaming fallback (chunk=%u)", sound_id, sound_path,
                  (unsigned int)SFX_STREAM_CHUNK_SIZE);
         sfx_playback_streaming(sound_id, generation, file);
     }
