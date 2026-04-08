@@ -62,7 +62,8 @@ python tools/sync_anim_sdcard.py --target-root F:\
 ```
 
 This copies the generated assets into `F:\anim` and verifies the result with
-hash comparisons.
+hash comparisons. If you omit `--source-dir`, the script uses the latest
+generated `release/*/sdcard/anim` directory it can find.
 
 The SD-card root should end up with this layout:
 
@@ -92,6 +93,10 @@ The SD-card root should end up with this layout:
 - The output directory is recreated when `--clean` is enabled.
 - Each GIF is expanded into a full-frame RGB565 `animpack`.
 - The manifest stores pack path, dimensions, frame count, and timing metadata.
+- Animation types without a source GIF are skipped instead of generating empty
+  placeholder outputs.
+- In the current `v0.2.0-alpha` source set, `custom1` and `custom2` are absent
+  and therefore do not appear in the generated manifest.
 
 ## Runtime Expectations
 

@@ -15,6 +15,8 @@ Alpha release baseline for the GIF-authored animation system on the ESP32-S3 mai
 - On-screen text visibility above animated backgrounds
 - Deployment flow for `release/v0.2.0-alpha/sdcard/anim` onto removable media
 - Known alpha limitation: several runtime states currently reuse the same placeholder GIF, and action data remains provisional
+- Current alpha animation bundle contains 10 generated types; `custom1` and
+  `custom2` are not included because their source GIFs are not present yet
 
 ### Release Assets
 This release includes two deliverables:
@@ -30,4 +32,6 @@ The firmware flash bundle contains:
 
 The SD-card animation bundle contains:
 - `anim_manifest.bin`
-- `*.animpack`
+- `*.animpack` for the currently generated state set (`boot`, `happy`, `error`,
+  `bluetooth`, `speaking`, `listening`, `processing`, `standby`, `thinking`,
+  `custom3`)

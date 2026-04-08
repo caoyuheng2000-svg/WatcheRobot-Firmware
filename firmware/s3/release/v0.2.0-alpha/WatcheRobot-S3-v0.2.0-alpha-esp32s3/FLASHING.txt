@@ -6,6 +6,7 @@ Release note:
 - This is an alpha release for the GIF / AnimPack runtime refactor.
 - Final per-state animation and action content are not fully refreshed yet.
 - Several runtime states currently reuse the same placeholder GIF.
+- The current generated SD animation pack contains 10 types; custom1/custom2 are not included yet.
 
 Package contents:
 1. Flash bundle in this folder

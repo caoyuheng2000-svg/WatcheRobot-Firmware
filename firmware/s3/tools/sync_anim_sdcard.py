@@ -41,6 +41,27 @@ def resolve_target_anim_dir(target_root: Path) -> Path:
     return target_root / "anim"
 
 
+def resolve_source_dir(explicit_source_dir: str | None) -> Path:
+    if explicit_source_dir is not None:
+        source_dir = Path(explicit_source_dir).resolve()
+        if not source_dir.is_dir():
+            raise SystemExit(f"Source directory does not exist: {source_dir}")
+        return source_dir
+
+    if DEFAULT_SOURCE_DIR.is_dir():
+        return DEFAULT_SOURCE_DIR.resolve()
+
+    release_root = PROJECT_ROOT / "release"
+    candidates = sorted(
+        (path for path in release_root.glob("*/sdcard/anim") if path.is_dir()),
+        key=lambda path: str(path).lower(),
+    )
+    if not candidates:
+        raise SystemExit(f"Unable to locate a generated anim source directory under {release_root}")
+
+    return candidates[-1].resolve()
+
+
 def verify_tree(source_dir: Path, target_dir: Path) -> None:
     source_files = sorted((path for path in source_dir.rglob("*") if path.is_file()), key=lambda path: str(path.relative_to(source_dir)).lower())
     target_files = sorted((path for path in target_dir.rglob("*") if path.is_file()), key=lambda path: str(path.relative_to(target_dir)).lower())
@@ -79,7 +100,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--source-dir",
-        default=str(DEFAULT_SOURCE_DIR),
+        default=None,
         help="Directory containing generated animpack assets",
     )
     parser.add_argument(
@@ -94,12 +115,9 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    source_dir = Path(args.source_dir).resolve()
+    source_dir = resolve_source_dir(args.source_dir)
     target_root = Path(args.target_root).resolve()
     target_dir = resolve_target_anim_dir(target_root)
-
-    if not source_dir.is_dir():
-        raise SystemExit(f"Source directory does not exist: {source_dir}")
 
     copy_tree(source_dir, target_dir, clean=not args.no_clean)
     verify_tree(source_dir, target_dir)
