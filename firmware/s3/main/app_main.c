@@ -186,6 +186,8 @@ static int transport_prepare_ws_client(const char *ws_url);
 static void transport_reset_cached_ws_resume_state(void);
 static void wait_for_behavior_idle(uint32_t timeout_ms);
 static void maybe_play_ble_connected_feedback(void);
+static void boot_halt_with_error(const char *error_msg);
+static int boot_prepare_animation_assets(void);
 
 #if CONFIG_WATCHER_LOG_HEAP_DIAGNOSTICS
 #define LOG_HEAP_STATE(stage) log_heap_state(stage)
@@ -250,6 +252,55 @@ static bool transport_has_cloud_runtime_headroom(void) {
     }
 
     return true;
+}
+
+static void boot_halt_with_error(const char *error_msg) {
+    const char *safe_error = (error_msg != NULL && error_msg[0] != '\0') ? error_msg : "Boot failed";
+
+    ESP_LOGE(TAG, "Fatal boot error: %s", safe_error);
+    boot_anim_show_error(safe_error);
+
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+static int boot_prepare_animation_assets(void) {
+    int boot_frame_count;
+    esp_err_t sd_ret;
+
+    boot_anim_set_text("Mounting SD...");
+    if (!bsp_sdcard_is_inserted()) {
+        ESP_LOGE(TAG, "SD card is not inserted");
+        boot_halt_with_error("Insert SD card");
+    }
+
+    sd_ret = bsp_sdcard_init_default();
+    if (sd_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(sd_ret));
+        boot_halt_with_error("SD mount failed");
+    }
+    boot_anim_set_progress(5);
+
+    boot_anim_set_text("Loading anim...");
+    if (anim_catalog_init() != 0) {
+        ESP_LOGE(TAG, "Failed to load SD animation manifest");
+        boot_halt_with_error("Anim manifest missing");
+    }
+    boot_anim_set_progress(10);
+
+    boot_frame_count = emoji_load_type(EMOJI_ANIM_BOOT);
+    if (boot_frame_count <= 0) {
+        ESP_LOGE(TAG, "Boot animation type is unavailable");
+        boot_halt_with_error("Boot anim missing");
+    }
+
+    if (emoji_get_image(EMOJI_ANIM_BOOT, 0) == NULL) {
+        ESP_LOGE(TAG, "Failed to load first boot animation frame");
+        boot_halt_with_error("Boot anim corrupt");
+    }
+
+    return boot_frame_count;
 }
 
 static bool transport_is_valid_ws_url(const char *ws_url) {
@@ -1179,6 +1230,8 @@ static void transport_coordinator_tick(void) {
 }
 
 void app_main(void) {
+    int boot_frame_count = 0;
+
     ESP_LOGI(TAG, "WatcheRobot S3 v2.0 starting");
     log_firmware_version();
 
@@ -1193,17 +1246,11 @@ void app_main(void) {
     boot_anim_set_text("Initializing...");
     boot_anim_set_progress(0);
 
-    /* 3. Initialize animation catalog and load boot assets only */
+    /* 3. Mount SD and validate animation assets before proceeding. */
+    boot_frame_count = boot_prepare_animation_assets();
     boot_anim_set_text("Boot...");
-    if (anim_catalog_init() == 0) {
-        int boot_frame_count = emoji_load_type(EMOJI_ANIM_BOOT);
-        if (boot_frame_count > 0) {
-            boot_anim_start_intro(EMOJI_ANIM_BOOT, boot_frame_count, BOOT_ANIM_INTERVAL_MS);
-        }
-        boot_anim_set_text("Preparing...");
-    } else {
-        ESP_LOGW(TAG, "SPIFFS init failed (emoji disabled)");
-    }
+    boot_anim_start_intro(EMOJI_ANIM_BOOT, boot_frame_count, BOOT_ANIM_INTERVAL_MS);
+    boot_anim_set_text("Preparing...");
 
     /* 4. Servo HAL init (GPIO 19/20 LEDC PWM, Phase 2 implementation) */
     boot_anim_set_progress(25);
@@ -1217,7 +1264,7 @@ void app_main(void) {
 
     if (control_ingress_init() != ESP_OK) {
         ESP_LOGE(TAG, "Control ingress init failed");
-        return;
+        boot_halt_with_error("Control init failed");
     }
 
     /* 5.5 BLE control + provisioning */

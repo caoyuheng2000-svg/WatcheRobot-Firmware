@@ -14,7 +14,7 @@
 #define TAG "ANIM_META"
 
 /* Metadata file path */
-#define ANIM_META_PATH "/spiffs/anim/anim_meta.json"
+#define ANIM_META_PATH "/sdcard/anim/anim_meta.json"
 
 /* Default values */
 #ifdef CONFIG_WATCHER_ANIM_FPS
