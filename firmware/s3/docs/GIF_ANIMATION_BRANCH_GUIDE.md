@@ -31,7 +31,7 @@ The branch has been brought to a hardware-validated baseline.
 Authoring and generated assets live in these locations:
 
 - Source GIFs: `firmware/s3/assets/gif/`
-- Generated assets: `firmware/s3/release/v0.2.0/sdcard/anim/`
+- Generated assets: `firmware/s3/release/v0.2.1/sdcard/anim/`
 - Device runtime path: `/sdcard/anim/`
 
 The runtime expects at least:
@@ -65,7 +65,7 @@ The current branch has been validated against this baseline:
 - Generated assets can be mirrored to an SD-card root with
   `tools/sync_anim_sdcard.py`.
 - Release packaging now produces both a firmware flash bundle and an SD-card
-  animation bundle for `v0.2.0`.
+  animation bundle for `v0.2.1`.
 
 ## Daily Workflow
 

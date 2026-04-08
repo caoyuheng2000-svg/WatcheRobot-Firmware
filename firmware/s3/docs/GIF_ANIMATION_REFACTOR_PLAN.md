@@ -4,7 +4,7 @@ This document remains the architecture baseline for the refactor.
 
 Current release note:
 
-- `v0.2.0` packages the runtime architecture and release flow.
+- `v0.2.1` packages the runtime architecture and release flow.
 - The current release bundle contains 10 generated animation types.
 - `custom1` and `custom2` are omitted until their source GIFs are added.
 

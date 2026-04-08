@@ -11,6 +11,27 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.2.1] - 2026-04-08
+
+### Added
+- Formal `v0.2.1` release packaging for both the ESP32-S3 flash bundle and the SD-card animation asset bundle
+- Updated GIF / AnimPack documentation set so the branch guide, toolchain guide, and roadmap all point at the current formal release
+
+### Fixed
+- Release documentation and packaging now consistently point at the current GIF-authored animation baseline instead of the earlier `v0.2.0` draft
+- Animation asset generation and SD sync tooling now default to the current formal release output path
+
+### Changed
+- Firmware version is now tracked as `v0.2.1`
+- Current release packaging and top-level docs are aligned around the validated GIF / AnimPack runtime baseline
+- The release train now tracks `v0.2.1` as the recommended package for SD-backed animation startup, state switching, and deployment validation
+
+### Notes
+- Release focus: formalized GIF / AnimPack packaging, synchronized documentation, and a clean validation target for the current animation architecture
+- The packaged SD animation set still contains 10 generated animation types; `custom1` and `custom2` remain out of scope until source GIFs are added
+
+---
+
 ## [0.2.0] - 2026-04-08
 
 ### Added
