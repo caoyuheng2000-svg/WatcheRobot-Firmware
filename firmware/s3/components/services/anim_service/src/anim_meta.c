@@ -30,18 +30,8 @@ static bool g_meta_loaded = false;
 
 /* Animation type names for JSON parsing */
 static const char *anim_type_names[EMOJI_ANIM_COUNT] = {
-    "boot",
-    "happy",
-    "error",
-    "bluetooth",
-    "speaking",
-    "listening",
-    "processing",
-    "standby",
-    "thinking",
-    "custom1",
-    "custom2",
-    "custom3",
+    "boot",       "happy",   "error",    "bluetooth", "speaking", "listening",
+    "processing", "standby", "thinking", "custom1",   "custom2",  "custom3",
 };
 
 static void set_defaults(void) {

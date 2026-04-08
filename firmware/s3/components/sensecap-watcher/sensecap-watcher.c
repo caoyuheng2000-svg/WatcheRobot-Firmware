@@ -6,10 +6,10 @@
 
 #include "diskio_impl.h"
 #include "diskio_sdmmc.h"
+#include "driver/sdspi_host.h"
 #include "esp_lvgl_port.h"
 #include "ff.h"
 #include "iot_button.h"
-#include "driver/sdspi_host.h"
 #include "sdmmc_common.h"
 #include "sensecap-watcher.h"
 
@@ -48,7 +48,7 @@ static const audio_codec_data_if_t *i2s_data_if = NULL;
         if ((condition)) {                                                                                             \
             esp_err_t step_err = (function)(target_card);                                                              \
             if (step_err != ESP_OK) {                                                                                  \
-                ESP_LOGD(TAG, "%s: %s returned 0x%x", __func__, #function, step_err);                                 \
+                ESP_LOGD(TAG, "%s: %s returned 0x%x", __func__, #function, step_err);                                  \
                 return step_err;                                                                                       \
             }                                                                                                          \
         }                                                                                                              \

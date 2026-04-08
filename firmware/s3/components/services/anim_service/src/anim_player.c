@@ -124,7 +124,8 @@ static int playback_open(anim_playback_t *playback, emoji_anim_type_t type, uint
         return -1;
     }
 
-    playback->slot_count = min_int(WATCHER_ANIM_RING_FRAMES, playback->stream.frame_count > 0 ? playback->stream.frame_count : 1);
+    playback->slot_count =
+        min_int(WATCHER_ANIM_RING_FRAMES, playback->stream.frame_count > 0 ? playback->stream.frame_count : 1);
     playback->in_use = true;
     playback->type = type;
     playback->generation_id = generation_id;
@@ -135,7 +136,8 @@ static int playback_open(anim_playback_t *playback, emoji_anim_type_t type, uint
     playback->next_slot_to_load = 0;
 
     for (int index = 0; index < playback->slot_count; ++index) {
-        if (anim_frame_buffer_init(&playback->slots[index], playback->stream.info.width, playback->stream.info.height) != 0) {
+        if (anim_frame_buffer_init(&playback->slots[index], playback->stream.info.width,
+                                   playback->stream.info.height) != 0) {
             playback_cleanup(playback);
             return -1;
         }
@@ -257,7 +259,8 @@ static int commit_pending_playback(void) {
     g_current_type = g_active_playback.type;
     g_requested_type = g_active_playback.type;
     g_next_frame_deadline_us =
-        esp_timer_get_time() + (int64_t)effective_delay_ms(&g_active_playback, g_active_playback.current_frame_index) * 1000LL;
+        esp_timer_get_time() +
+        (int64_t)effective_delay_ms(&g_active_playback, g_active_playback.current_frame_index) * 1000LL;
     if (g_frame_timer != NULL && g_active_playback.stream.frame_count > 1) {
         lv_timer_resume(g_frame_timer);
     } else if (g_frame_timer != NULL) {

@@ -1,5 +1,5 @@
-#include "esp_err.h"
 #include "esp_app_desc.h"
+#include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_task_wdt.h"
@@ -166,9 +166,7 @@ static void log_firmware_version(void) {
         return;
     }
 
-    ESP_LOGI(TAG, "Firmware version: project=%s version=%s idf=%s",
-             app_desc->project_name,
-             app_desc->version,
+    ESP_LOGI(TAG, "Firmware version: project=%s version=%s idf=%s", app_desc->project_name, app_desc->version,
              app_desc->idf_ver);
 }
 
@@ -593,8 +591,7 @@ static bool transport_start_ws_transport(const char *ws_url, const char *start_r
         bool recovery_was_active = s_low_memory_recovery_active;
 
         s_consecutive_ws_start_defers += 1U;
-        if (!s_low_memory_recovery_active &&
-            s_consecutive_ws_start_defers >= WS_START_LOW_MEMORY_RECOVERY_DEFERS) {
+        if (!s_low_memory_recovery_active && s_consecutive_ws_start_defers >= WS_START_LOW_MEMORY_RECOVERY_DEFERS) {
             transport_enter_low_memory_recovery("repeated ws start low internal heap");
         }
 
@@ -602,9 +599,9 @@ static bool transport_start_ws_transport(const char *ws_url, const char *start_r
             if (!transport_has_ws_start_headroom()) {
                 LOG_HEAP_STATE("ws_start_deferred");
                 transport_schedule_retry(CLOUD_RETRY_DELAY_MS);
-                transport_set_state(TRANSPORT_BLE_IDLE_CLOUD_SUSPENDED, s_low_memory_recovery_active
-                                                                            ? "low-memory recovery waiting ws heap headroom"
-                                                                            : "waiting ws heap headroom");
+                transport_set_state(TRANSPORT_BLE_IDLE_CLOUD_SUSPENDED,
+                                    s_low_memory_recovery_active ? "low-memory recovery waiting ws heap headroom"
+                                                                 : "waiting ws heap headroom");
                 return false;
             }
         } else {
@@ -650,8 +647,7 @@ static bool transport_try_cached_ws_resume(void) {
         bool recovery_was_active = s_low_memory_recovery_active;
 
         s_consecutive_ws_start_defers += 1U;
-        if (!s_low_memory_recovery_active &&
-            s_consecutive_ws_start_defers >= WS_START_LOW_MEMORY_RECOVERY_DEFERS) {
+        if (!s_low_memory_recovery_active && s_consecutive_ws_start_defers >= WS_START_LOW_MEMORY_RECOVERY_DEFERS) {
             transport_enter_low_memory_recovery("repeated ws start low internal heap");
         }
 
@@ -659,17 +655,17 @@ static bool transport_try_cached_ws_resume(void) {
             if (!transport_has_ws_start_headroom()) {
                 LOG_HEAP_STATE("cached_ws_start_deferred");
                 transport_schedule_retry(CLOUD_RETRY_DELAY_MS);
-                transport_set_state(TRANSPORT_BLE_IDLE_CLOUD_SUSPENDED, s_low_memory_recovery_active
-                                                                            ? "low-memory recovery waiting cached ws heap headroom"
-                                                                            : "waiting cached ws heap headroom");
+                transport_set_state(TRANSPORT_BLE_IDLE_CLOUD_SUSPENDED,
+                                    s_low_memory_recovery_active ? "low-memory recovery waiting cached ws heap headroom"
+                                                                 : "waiting cached ws heap headroom");
                 return true;
             }
         } else {
             LOG_HEAP_STATE("cached_ws_start_deferred");
             transport_schedule_retry(CLOUD_RETRY_DELAY_MS);
-            transport_set_state(TRANSPORT_BLE_IDLE_CLOUD_SUSPENDED, s_low_memory_recovery_active
-                                                                        ? "low-memory recovery waiting cached ws heap headroom"
-                                                                        : "waiting cached ws heap headroom");
+            transport_set_state(TRANSPORT_BLE_IDLE_CLOUD_SUSPENDED,
+                                s_low_memory_recovery_active ? "low-memory recovery waiting cached ws heap headroom"
+                                                             : "waiting cached ws heap headroom");
             return true;
         }
     }
@@ -998,9 +994,9 @@ static void transport_begin_wifi_resume(const char *reason) {
         if (s_low_memory_recovery_active != recovery_was_active) {
             if (!transport_has_wifi_resume_headroom()) {
                 transport_schedule_retry(CLOUD_RETRY_DELAY_MS);
-                transport_set_state(TRANSPORT_BLE_IDLE_CLOUD_SUSPENDED, s_low_memory_recovery_active
-                                                                            ? "low-memory recovery waiting heap headroom"
-                                                                            : "waiting heap headroom");
+                transport_set_state(TRANSPORT_BLE_IDLE_CLOUD_SUSPENDED,
+                                    s_low_memory_recovery_active ? "low-memory recovery waiting heap headroom"
+                                                                 : "waiting heap headroom");
                 return;
             }
         } else {

@@ -52,18 +52,8 @@ static const char *k_manifest_magic = "ANIM";
 static const char *k_pack_magic = "ANPK";
 
 static const char *emoji_names[EMOJI_ANIM_COUNT] = {
-    "boot",
-    "happy",
-    "error",
-    "bluetooth",
-    "speaking",
-    "listening",
-    "processing",
-    "standby",
-    "thinking",
-    "custom1",
-    "custom2",
-    "custom3",
+    "boot",       "happy",   "error",    "bluetooth", "speaking", "listening",
+    "processing", "standby", "thinking", "custom1",   "custom2",  "custom3",
 };
 
 static bool g_catalog_initialized = false;
@@ -171,7 +161,8 @@ static int anim_frame_buffer_ensure(anim_frame_buffer_t *buffer, uint16_t width,
         return -1;
     }
 
-    if (buffer->img_data != NULL && buffer->data_size == expected_size && buffer->width == width && buffer->height == height) {
+    if (buffer->img_data != NULL && buffer->data_size == expected_size && buffer->width == width &&
+        buffer->height == height) {
         return 0;
     }
 
@@ -363,7 +354,8 @@ int anim_stream_read_frame(anim_stream_t *stream, int frame_index, anim_frame_bu
 
     anim_pack_frame_desc_t *frame = &stream->frames[frame_index];
     if (frame->size > buffer->data_size) {
-        ESP_LOGW(TAG, "Frame payload too large for buffer: %u > %u", (unsigned)frame->size, (unsigned)buffer->data_size);
+        ESP_LOGW(TAG, "Frame payload too large for buffer: %u > %u", (unsigned)frame->size,
+                 (unsigned)buffer->data_size);
         return -1;
     }
 
