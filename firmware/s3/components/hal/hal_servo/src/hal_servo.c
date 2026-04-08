@@ -53,7 +53,7 @@
 
 /* Default startup angles */
 #define SERVO_X_DEFAULT_DEG 90
-#define SERVO_Y_DEFAULT_DEG 90
+#define SERVO_Y_DEFAULT_DEG 120
 
 /** Synchronized dual-axis move command */
 typedef struct {

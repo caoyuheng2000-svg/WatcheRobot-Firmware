@@ -16,6 +16,7 @@
 static const char *TAG = "BSP";
 
 #define WATCHER_LCD_SAFE_TRANS_QUEUE_DEPTH 1
+#define WATCHER_SD_SPI_MAX_FREQ_KHZ 10000
 
 static led_strip_handle_t rgb_led_handle = NULL;
 static esp_io_expander_handle_t io_exp_handle = NULL;
@@ -126,6 +127,7 @@ static esp_err_t watcher_sdspi_mount_without_crc_cmd(const char *base_path, cons
     bool diskio_registered = false;
     bool vfs_registered = false;
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+    host.max_freq_khz = WATCHER_SD_SPI_MAX_FREQ_KHZ;
 
     if (ff_diskio_get_drive(&pdrv) != ESP_OK || pdrv == FF_DRV_NOT_USED) {
         return ESP_ERR_NO_MEM;
@@ -1076,11 +1078,9 @@ esp_err_t bsp_sdcard_init(char *mount_point, size_t max_files) {
     gpio_set_level(BSP_SD_SPI_CS, 1);
     vTaskDelay(pdMS_TO_TICKS(20));
 
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.slot = BSP_SD_SPI_NUM;
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot_config.gpio_cs = BSP_SD_SPI_CS;
-    slot_config.host_id = host.slot;
+    slot_config.host_id = BSP_SD_SPI_NUM;
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
         .format_if_mount_failed = false, .max_files = max_files, .allocation_unit_size = 16 * 1024};
     ret = watcher_sdspi_mount_without_crc_cmd(mount_point, &slot_config, &mount_config, &card);

@@ -9,6 +9,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -50,6 +51,7 @@ typedef struct __attribute__((packed)) {
 
 static const char *k_manifest_magic = "ANIM";
 static const char *k_pack_magic = "ANPK";
+static const int k_frame_read_attempts = 3;
 
 static const char *emoji_names[EMOJI_ANIM_COUNT] = {
     "boot",       "happy",   "error",    "bluetooth", "speaking", "listening",
@@ -88,9 +90,29 @@ static void normalize_pack_path(const char *src, char *dst, size_t dst_size) {
     snprintf(dst, dst_size, "%s/%s", ANIM_STORAGE_ROOT, src);
 }
 
+static int anim_stream_reopen_file(anim_stream_t *stream) {
+    if (stream == NULL || stream->info.pack_path[0] == '\0') {
+        return -1;
+    }
+
+    FILE *reopened = fopen(stream->info.pack_path, "rb");
+    if (reopened == NULL) {
+        ESP_LOGW(TAG, "Failed to reopen animpack %s: errno=%d (%s)", stream->info.pack_path, errno, strerror(errno));
+        return -1;
+    }
+
+    if (stream->file != NULL) {
+        fclose(stream->file);
+    }
+
+    stream->file = reopened;
+    return 0;
+}
+
 static int load_manifest_from_path(const char *manifest_path) {
     FILE *handle = fopen(manifest_path, "rb");
     if (handle == NULL) {
+        ESP_LOGW(TAG, "Failed to open anim manifest %s: errno=%d (%s)", manifest_path, errno, strerror(errno));
         return -1;
     }
 
@@ -359,16 +381,33 @@ int anim_stream_read_frame(anim_stream_t *stream, int frame_index, anim_frame_bu
         return -1;
     }
 
-    if (fseek(stream->file, (long)(stream->payload_offset + frame->offset), SEEK_SET) != 0) {
-        return -1;
-    }
-    if (fread(buffer->img_data, 1, frame->size, stream->file) != frame->size) {
-        return -1;
+    for (int attempt = 1; attempt <= k_frame_read_attempts; ++attempt) {
+        errno = 0;
+        clearerr(stream->file);
+
+        if (fseek(stream->file, (long)(stream->payload_offset + frame->offset), SEEK_SET) == 0) {
+            size_t bytes_read = fread(buffer->img_data, 1, frame->size, stream->file);
+            if (bytes_read == frame->size) {
+                buffer->img_dsc.data = buffer->img_data;
+                buffer->img_dsc.data_size = (uint32_t)frame->size;
+                return 0;
+            }
+
+            ESP_LOGW(TAG, "Short read for %s frame %d: got=%u expected=%u errno=%d ferror=%d feof=%d (attempt %d/%d)",
+                     stream->info.name, frame_index, (unsigned)bytes_read, (unsigned)frame->size, errno,
+                     ferror(stream->file), feof(stream->file), attempt, k_frame_read_attempts);
+        } else {
+            ESP_LOGW(TAG, "Failed to seek %s frame %d: errno=%d (%s) (attempt %d/%d)", stream->info.name, frame_index,
+                     errno, strerror(errno), attempt, k_frame_read_attempts);
+        }
+
+        if (attempt < k_frame_read_attempts && anim_stream_reopen_file(stream) == 0) {
+            continue;
+        }
+        break;
     }
 
-    buffer->img_dsc.data = buffer->img_data;
-    buffer->img_dsc.data_size = (uint32_t)frame->size;
-    return 0;
+    return -1;
 }
 
 int anim_load_static_frame(emoji_anim_type_t type, int frame_index, anim_frame_buffer_t *buffer) {

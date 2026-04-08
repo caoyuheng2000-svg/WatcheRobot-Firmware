@@ -37,7 +37,7 @@ typedef enum {
  *
  * Startup defaults applied directly by hal_servo_init():
  *   - X axis: 90°
- *   - Y axis: 90°
+ *   - Y axis: 120°
  *
  * Note: some behavior states later move Y to 120° after startup. That behavior
  * is defined by the state/action resources, not by the HAL defaults.

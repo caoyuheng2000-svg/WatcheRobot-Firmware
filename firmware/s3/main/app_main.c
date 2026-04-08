@@ -30,6 +30,9 @@
 #include "ws_handlers.h"
 #include "ws_router.h"
 
+#include <dirent.h>
+#include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -185,6 +188,7 @@ static void transport_reset_cached_ws_resume_state(void);
 static void wait_for_behavior_idle(uint32_t timeout_ms);
 static void maybe_play_ble_connected_feedback(void);
 static void boot_halt_with_error(const char *error_msg);
+static void log_directory_contents(const char *path);
 static int boot_prepare_animation_assets(void);
 
 #if CONFIG_WATCHER_LOG_HEAP_DIAGNOSTICS
@@ -263,6 +267,42 @@ static void boot_halt_with_error(const char *error_msg) {
     }
 }
 
+static void log_directory_contents(const char *path) {
+    DIR *dir = NULL;
+    struct dirent *entry = NULL;
+    size_t entry_count = 0;
+
+    if (path == NULL || path[0] == '\0') {
+        return;
+    }
+
+    errno = 0;
+    dir = opendir(path);
+    if (dir == NULL) {
+        ESP_LOGW(TAG, "Unable to list %s: errno=%d (%s)", path, errno, strerror(errno));
+        return;
+    }
+
+    ESP_LOGI(TAG, "Listing directory contents for %s", path);
+    errno = 0;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        ++entry_count;
+        ESP_LOGI(TAG, "  [%u] %s", (unsigned)entry_count, entry->d_name);
+    }
+
+    if (errno != 0) {
+        ESP_LOGW(TAG, "Directory iteration for %s ended with errno=%d (%s)", path, errno, strerror(errno));
+    } else if (entry_count == 0) {
+        ESP_LOGW(TAG, "Directory %s is empty", path);
+    }
+
+    closedir(dir);
+}
+
 static int boot_prepare_animation_assets(void) {
     int boot_frame_count;
     esp_err_t sd_ret;
@@ -278,6 +318,8 @@ static int boot_prepare_animation_assets(void) {
         ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(sd_ret));
         boot_halt_with_error("SD mount failed");
     }
+    log_directory_contents("/sdcard");
+    log_directory_contents("/sdcard/anim");
     boot_anim_set_progress(5);
 
     boot_anim_set_text("Loading anim...");

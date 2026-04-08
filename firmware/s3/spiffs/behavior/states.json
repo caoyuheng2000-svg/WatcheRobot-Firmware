@@ -5,7 +5,7 @@
     "boot": {
       "loop": false,
       "motion": [
-        { "at_ms": 0, "x_deg": 90, "y_deg": 90, "duration_ms": 200 }
+        { "at_ms": 0, "x_deg": 90, "y_deg": 120, "duration_ms": 200 }
       ],
       "expression": [
         { "at_ms": 0, "anim": "happy", "text": "Booting...", "font_size": 24 }
