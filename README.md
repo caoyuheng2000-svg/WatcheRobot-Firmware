@@ -22,15 +22,15 @@ WatcheRobot is an open-source AI assistant robot built on the **SenseCAP Watcher
 
 ### Current Release Track
 
-- Current release target: `v0.2.0-alpha`
-- `v0.2.0-alpha` is the recommended alpha baseline for validating the new GIF-authored animation system on the ESP32-S3 mainline:
+- Current release target: `v0.2.0`
+- `v0.2.0` is the recommended baseline for the GIF-authored animation system on the ESP32-S3 mainline:
   - PNG-sequence runtime playback has been replaced by SD-backed `animpack` streaming generated from GIF source assets
   - Boot animation now runs from `/sdcard/anim/boot.animpack`, and missing SD animation resources fail into a deterministic boot error path
   - UI text remains visible above animated backgrounds, and runtime GIF switches no longer flash white or show `No data`
   - The branch still carries the reconnect hardening, Bluetooth feedback, cached WebSocket resume, audio recovery work from `v0.1.7`, and the packaged Windows flashing workflow added on main in `v0.1.8`
-- This alpha release is suitable for repeated validation of SD-backed animation startup, on-screen text behavior, runtime state switching, and mixed local/cloud UI transitions
-- Final action and animation content are not fully refreshed yet; several runtime states currently reuse the same placeholder GIF during alpha verification
-- Release deliverables now include both a firmware flash bundle and an SD-card animation asset bundle under `firmware/s3/release/v0.2.0-alpha`
+- This release is suitable for repeated validation of SD-backed animation startup, on-screen text behavior, runtime state switching, and mixed local/cloud UI transitions
+- The current packaged GIF resource set includes 10 generated animation types; `custom1` and `custom2` are not included yet because their source GIFs are not present
+- Release deliverables now include both a firmware flash bundle and an SD-card animation asset bundle under `firmware/s3/release/v0.2.0`
 - Windows release ZIP flashing remains available through `tools\flash-release.cmd` and `tools\win_flasher` for packaged validation workflows
 
 ---

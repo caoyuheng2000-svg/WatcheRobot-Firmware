@@ -4,10 +4,9 @@ This document remains the architecture baseline for the refactor.
 
 Current release note:
 
-- `v0.2.0-alpha` validates the runtime architecture and packaging flow.
-- Final per-state animation and action content are not fully refreshed yet.
-- Several animation states in the current alpha package intentionally reuse the
-  same placeholder GIF.
+- `v0.2.0` packages the runtime architecture and release flow.
+- The current release bundle contains 10 generated animation types.
+- `custom1` and `custom2` are omitted until their source GIFs are added.
 
 For the current validated branch state, day-to-day workflow, and next steps, see
 also:
