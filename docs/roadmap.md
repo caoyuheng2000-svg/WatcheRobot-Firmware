@@ -1,280 +1,188 @@
 # Development Roadmap
 
-> WatcheRobot Firmware development phases and priorities
+> WatcheRobot Firmware development status and next priorities, synchronized to the latest formal tag `v0.2.1`.
 
 ---
 
-## Current Version: 2.0.0 (Phase 1 Complete)
+## Current Baseline
 
-Phase 1 delivered the four-layer component architecture migration from MVP-W prototype.
+- Current formal release tag: `v0.2.1`
+- Baseline focus: GIF-authored animation pipeline, SD-backed `animpack` runtime, BLE provisioning, and current cloud transport recovery behavior
+- Current release package includes:
+  - ESP32-S3 firmware flash bundle
+  - SD-card animation asset bundle
 
 ---
 
-## Phase Overview
+## Status Snapshot
 
-| Phase | Description | Priority | Status |
+| Track | Description | Priority | Status |
 |-------|-------------|----------|--------|
-| **Phase 1** | Architecture Migration | P0 | ✅ Complete |
-| **Phase 2** | Servo Direct Drive | P0 | 🔲 Pending |
-| **Phase 3** | Animation 30fps | P0 | 🔲 Pending |
-| **Phase 4** | Dual OTA Partition | P1 | 🔲 Pending |
-| **Phase 5** | Firmware OTA | P1 | 🔲 Pending |
-| **Phase 6** | BLE Service | P1 | 🔲 Pending |
-| **Phase 7** | Camera Streaming | P1 | 🔲 Pending |
-| **Phase 8** | Animation OTA | P2 | 🔲 Pending |
+| **Track 1** | Architecture Migration | P0 | Complete |
+| **Track 2** | Servo Direct Drive | P0 | Complete |
+| **Track 3** | GIF / AnimPack Animation Runtime | P0 | Complete |
+| **Track 4** | BLE Provisioning + Local Control | P1 | Integrated |
+| **Track 5** | Camera Streaming Baseline | P1 | In Progress |
+| **Track 6** | Dual OTA Partition | P1 | Pending |
+| **Track 7** | Firmware OTA | P1 | Pending |
+| **Track 8** | Animation OTA | P2 | Pending |
+| **Track 9** | Protocol Hardening / Recovery / Security | P2 | In Progress |
 
 ---
 
-## Phase 1: Architecture Migration ✅
+## Completed Tracks
 
-**Status**: Complete
-**Commit**: `cf1900f`
+### Track 1: Architecture Migration
 
-### Deliverables
-- [x] Four-layer component structure (drivers/hal/protocols/services/utils)
-- [x] Code migration from MVP-W `main/` to components
-- [x] Remove `cJSON.c` → use ESP-IDF `json` component
-- [x] Remove `uart_bridge` → will be replaced by `hal_servo`
-- [x] Component `CMakeLists.txt` with proper `REQUIRES`/`PRIV_REQUIRES`
-- [x] `idf_component.yml` manifests
-- [x] Documentation structure
+**Status**: Complete  
+**Outcome**:
+- Four-layer component structure is now the mainline organization model
+- `main/` is reduced to a thin application entry
+- Components are split across `drivers / hal / protocols / services / utils`
+- ESP-IDF component manifests, dependency wiring, and documentation layout are in place
 
----
+### Track 2: Servo Direct Drive
 
-## Phase 2: Servo Direct Drive (P0)
+**Status**: Complete  
+**Mainline status**:
+- Direct GPIO PWM servo control replaced the old UART-sidecar model
+- `hal_servo` is active in the current firmware
+- Current runtime includes:
+  - direct X/Y control
+  - smooth motion path
+  - mechanical protection limits
+  - MS90 servo layer and startup stability fixes
 
-**Status**: Pending
-**Prerequisite**: Phase 1
-**Est. Effort**: 2-3 days
+### Track 3: GIF / AnimPack Animation Runtime
 
-### Goal
-Replace UART→MCU servo control with direct GPIO 19/20 LEDC PWM.
+**Status**: Complete  
+**Current baseline**:
+- The old PNG-sequence runtime plan is no longer the active roadmap target
+- Mainline now uses:
+  - GIF as the offline authoring format
+  - `animpack` as the runtime asset format
+  - SD-backed animation streaming instead of full PNG hot caches
+- Boot animation and runtime state animation both run from `/sdcard/anim`
+- Current formal package includes 10 generated animation types
 
-### Component: `hal/hal_servo`
+### Track 4: BLE Provisioning + Local Control
 
-```
-hal_servo/
-├── CMakeLists.txt
-├── idf_component.yml
-├── Kconfig
-├── README.md
-├── include/
-│   └── hal_servo.h
-├── src/
-│   └── hal_servo.c
-└── test_apps/
-    └── main/
-        └── test_hal_servo.c
-```
-
-### Key Features
-- LEDC Timer 0, 50Hz, 14-bit resolution
-- Channel 0 → GPIO 19 (X-axis)
-- Channel 1 → GPIO 20 (Y-axis)
-- Smooth move with FreeRTOS background task (10ms step)
-- Y-axis mechanical limit: 90°–150° (Kconfig)
-
-### API
-```c
-esp_err_t hal_servo_init(void);
-esp_err_t hal_servo_set_angle(servo_axis_t axis, int angle_deg);
-esp_err_t hal_servo_move_smooth(servo_axis_t axis, int angle_deg, int duration_ms);
-esp_err_t hal_servo_move_sync(int x_deg, int y_deg, int duration_ms);
-int hal_servo_get_angle(servo_axis_t axis);
-```
-
-### Migration Source
-`firmware/mcu/main/servo_control.c` → Logic移植, GPIO changed
+**Status**: Integrated  
+**Current baseline**:
+- BLE provisioning is part of the current startup and recovery path
+- BLE local control can operate independently of Wi-Fi / WebSocket
+- BLE-connected sessions pause background Wi-Fi / WS work to protect local control
+- BLE disconnect restores Wi-Fi / WS when saved credentials exist
 
 ---
 
-## Phase 3: Animation 30fps (P0)
+## In-Progress Tracks
 
-**Status**: Pending
-**Prerequisite**: Phase 1
-**Est. Effort**: 3-4 days
+### Track 5: Camera Streaming Baseline
 
-### Goal
-Achieve smooth 30fps animation playback with PNG→RGB565 PSRAM caching.
+**Status**: In Progress  
+**What is already done**:
+- `hal_camera` and `camera_service` are present in the current codebase
+- JPEG single-image capture and MJPEG-style frame streaming have a frozen protocol baseline
+- Camera control and media transport are documented against the current WebSocket + `WSPK` framing model
 
-### Component: `services/anim_service`
+**What is still pending**:
+- stronger runtime recovery and stats surfaces
+- longer stability validation under mixed audio / BLE / cloud load
+- more advanced media transport handling if the current baseline proves insufficient
 
-### Key Changes
-- **anim_storage.c**: Load PNG, decode to RGB565, store in PSRAM
-- **anim_player.c**: Use `lv_animimg` widget, < 1ms frame switch
-- **anim_meta.c**: Parse `/spiffs/anim/anim_meta.json`
+### Track 9: Protocol Hardening / Recovery / Security
 
-### Memory Strategy
-- Single frame: 412 × 412 × 2 = 332KB (RGB565)
-- Lazy load: Only current animation type's frames in PSRAM
-- Max ~18 frames per animation type
+**Status**: In Progress  
+**Current baseline already includes**:
+- BLE-priority transport coordination
+- cached WebSocket endpoint resume before full discovery fallback
+- current `Watcher-WS-Protocol v0.1.5` freeze baseline
 
-### Target Performance
-- FPS: 30 (was ~6.7fps)
-- Frame switch: < 1ms
-- Type switch: < 500ms (decode + load)
-
----
-
-## Phase 4: Dual OTA Partition (P1)
-
-**Status**: Pending
-**Prerequisite**: Phase 1
-**Est. Effort**: 1 day
-
-### Goal
-Switch from `factory` to `ota_0`/`ota_1` partition layout.
-
-### Partition Table
-```csv
-# Name,    Type, SubType,  Offset,    Size
-nvs,       data, nvs,      0x9000,    0x6000
-phy_init,  data, phy,      0xF000,    0x1000
-otadata,   data, ota,      0x10000,   0x2000
-ota_0,     app,  ota_0,    0x20000,   0x500000
-ota_1,     app,  ota_1,    0x520000,  0x500000
-model,     data, spiffs,   0xA20000,  0x50000
-storage,   data, spiffs,   0xA70000,  0x580000
-```
-
-### Notes
-- First flash requires full erase
-- Manual `esp_ota_set_boot_partition()` for initial setup
+**Still open**:
+- stronger credential / provisioning safety hardening
+- tighter discovery / transport security posture
+- future protocol cleanup after current integration stabilizes
 
 ---
 
-## Phase 5: Firmware OTA (P1)
+## Pending Tracks
 
-**Status**: Pending
-**Prerequisite**: Phase 4
-**Est. Effort**: 2-3 days
+### Track 6: Dual OTA Partition
 
-### Component: `services/ota_service`
+**Status**: Pending  
+**Goal**:
+- Move from the current single-app release flow to a formal `ota_0 / ota_1` partition scheme
 
-### Flow
-1. Server sends `fw_ota_notify` with URL + SHA256
-2. Device downloads via `esp_https_ota`
-3. Validate SHA256, set boot partition
-4. Reboot
-5. `ota_service_mark_valid()` on success (prevent rollback)
+**Why it matters**:
+- Required foundation for robust rollback-safe firmware OTA
+- Reduces risk when shipping remote upgrades beyond local validation
 
-### API
-```c
-esp_err_t ota_service_init(void);
-esp_err_t ota_service_start(const char *url, const char *expected_version);
-void ota_service_mark_valid(void);
-const char* ota_service_get_fw_version(void);
-```
+### Track 7: Firmware OTA
 
----
+**Status**: Pending  
+**Goal**:
+- Implement the end-to-end OTA flow:
+  - server notification
+  - secure download
+  - checksum / version validation
+  - boot partition switch
+  - success confirmation / rollback handling
 
-## Phase 6: BLE Service (P1)
+**Current status**:
+- OTA service stubs and protocol placeholders exist
+- full production upgrade flow is not yet closed
 
-**Status**: Pending
-**Prerequisite**: Phase 1
-**Est. Effort**: 3-4 days
+### Track 8: Animation OTA
 
-### Component: `protocols/ble_service`
+**Status**: Pending  
+**Goal**:
+- Support hot-swapping animation assets without manual SD bundle replacement
 
-### Features
-1. **GATT Control Service** (UUID 0x1234)
-   - Servo control
-   - Display update
-   - Status notification
-
-2. **WiFi Provisioning**
-   - ESP-IDF `wifi_provisioning` over BLE
-
-### Config
-```kconfig
-config WATCHER_BLE_ENABLE
-    bool "Enable BLE service"
-    default n
-```
-
-### Coexistence
-- Enable `CONFIG_ESP32_WIFI_SW_COEXIST_ENABLE`
-- Limit BLE advertising during TTS playback
+**Current context**:
+- `v0.2.1` packages SD-backed animation assets cleanly
+- but runtime remote asset update is still future work
 
 ---
 
-## Phase 7: Camera Streaming (P1)
+## Next Priorities
 
-**Status**: Pending
-**Prerequisite**: Phase 1 + Hardware verification
-**Est. Effort**: 4-5 days
+### P1: Formal OTA Foundation
+- Introduce dual OTA partition layout
+- Close the actual firmware OTA path on top of that layout
 
-### Components
-- `hal/hal_camera`: SSCMA client wrapper
-- `services/camera_service`: Streaming orchestration
+### P1: Camera Stability and Runtime Validation
+- Strengthen recovery behavior
+- Add better operational observability
+- Validate mixed-mode runtime behavior with audio, BLE, and cloud traffic
 
-### Priority Rules
-- TTS playing → Stream paused
-- Voice recording → Stream throttled to 1fps
-- WebSocket disconnected → Stream stopped
+### P2: Animation Delivery Refinement
+- Fill the missing `custom1` / `custom2` source assets
+- Define whether animation OTA or SD-bundle-only delivery is the long-term product path
 
-### Binary Frame Format (WVID)
-```
-Offset  Size  Field
-0       4     Magic: "WVID"
-4       4     Timestamp (ms)
-8       2     Width
-10      2     Height
-12      4     JPEG size
-16      N     JPEG data
-```
+### P2: Protocol / Security Hardening
+- Improve provisioning UX and credential handling
+- Revisit discovery and transport security after current field validation settles
 
 ---
 
-## Phase 8: Animation OTA (P2)
+## Milestone Direction
 
-**Status**: Pending
-**Prerequisite**: Phase 3
-**Est. Effort**: 2-3 days
-
-### Goal
-Hot-swap animation assets via WebSocket.
-
-### Flow
-1. Server sends `anim_ota_start` with metadata
-2. Device receives PNG frames via binary WebSocket
-3. Write to `/spiffs/anim/` SPIFFS
-4. Update `anim_meta.json`
-5. Reload animation
+| Target | Focus |
+|--------|-------|
+| **v0.2.x** | Stabilize GIF / AnimPack runtime baseline and supporting release workflow |
+| **v0.3.0** | OTA-ready platform foundation |
+| **v0.4.0** | Stronger camera runtime baseline and system-level integration hardening |
+| **v1.0.0** | Production-oriented firmware baseline with OTA, validated media path, and refined provisioning / recovery behavior |
 
 ---
 
-## Dependencies Graph
+## Notes
 
-```
-Phase 1 (Architecture)
-    │
-    ├──► Phase 2 (Servo)
-    │
-    ├──► Phase 3 (Animation)
-    │        │
-    │        └──► Phase 8 (Anim OTA)
-    │
-    ├──► Phase 4 (Partitions)
-    │        │
-    │        └──► Phase 5 (Firmware OTA)
-    │
-    ├──► Phase 6 (BLE)
-    │
-    └──► Phase 7 (Camera)
-```
+- This roadmap intentionally reflects the current real mainline state, not the older PNG-cache animation plan.
+- For the currently frozen communication baseline, see `firmware/s3/docs/COMM_PROTOCOL_FREEZE.md`.
+- For the current formal animation baseline, see the `v0.2.1` release package and related GIF / AnimPack documentation.
 
 ---
 
-## Milestone Releases
-
-| Version | Phases | Target |
-|---------|--------|--------|
-| 2.1.0 | Phase 2 + 3 | Core functionality |
-| 2.2.0 | Phase 4 + 5 | OTA ready |
-| 2.3.0 | Phase 6 + 7 | Full featured |
-| 3.0.0 | Phase 8 + Refinements | Production ready |
-
----
-
-*Last updated: 2026-03-11*
+*Last updated: 2026-04-09*

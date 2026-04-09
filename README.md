@@ -32,6 +32,10 @@ WatcheRobot is an open-source AI assistant robot built on the **SenseCAP Watcher
 - The current packaged GIF resource set includes 10 generated animation types; `custom1` and `custom2` are not included yet because their source GIFs are not present
 - Release deliverables now include both a firmware flash bundle and an SD-card animation asset bundle under `firmware/s3/release/v0.2.1`
 - Windows release ZIP flashing remains available through `tools\flash-release.cmd` and `tools\win_flasher` for packaged validation workflows
+- After `v0.2.1`, the main remaining roadmap work is:
+  - dual OTA partitioning and full firmware OTA
+  - camera runtime stability and recovery hardening
+  - future animation delivery refinement such as animation OTA
 
 ---
 
@@ -164,7 +168,7 @@ WatcheRobot-Firmware/
 | Document | Description |
 |----------|-------------|
 | [docs/getting-started.md](docs/getting-started.md) | Full setup guide |
-| [docs/roadmap.md](docs/roadmap.md) | Development phases and milestones |
+| [docs/roadmap.md](docs/roadmap.md) | Current status, completed tracks, and next priorities synchronized to `v0.2.1` |
 
 ### Architecture & Design
 
