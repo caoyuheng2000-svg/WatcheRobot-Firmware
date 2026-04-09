@@ -16,7 +16,7 @@ idf_component_register(
         voice_service
         behavior_state_service
         anim_service
-        camera_service
+        # camera_service
         control_ingress
         ota_service
         # Utils

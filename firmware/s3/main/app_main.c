@@ -15,7 +15,7 @@
 #include "ble_service.h"
 #include "boot_anim.h"
 #include "bsp_watcher.h"
-#include "camera_service.h"
+// #include "camera_service.h"
 #include "control_ingress.h"
 #include "discovery_client.h"
 #include "display_ui.h"
@@ -58,8 +58,8 @@
 #define WS_START_DISPLAY_SETTLE_MS 150U
 #define CLOUD_RUNTIME_MIN_INTERNAL_FREE_BYTES (24U * 1024U)
 #define CLOUD_RUNTIME_MIN_INTERNAL_LARGEST_BYTES (12U * 1024U)
-#define CAMERA_DIAG_MIN_INTERNAL_FREE_BYTES (48U * 1024U)
-#define CAMERA_DIAG_MIN_INTERNAL_LARGEST_BYTES (16U * 1024U)
+// #define CAMERA_DIAG_MIN_INTERNAL_FREE_BYTES (48U * 1024U)
+// #define CAMERA_DIAG_MIN_INTERNAL_LARGEST_BYTES (16U * 1024U)
 #ifdef CONFIG_WATCHER_ANIM_FPS
 #define BOOT_ANIM_INTERVAL_MS (1000U / CONFIG_WATCHER_ANIM_FPS)
 #else
@@ -403,14 +403,14 @@ static void transport_sync_boot_state(void) {
     }
 }
 
-#if CONFIG_WATCHER_CAMERA_BOOT_DIAG
-static bool has_internal_heap_headroom(size_t min_free_bytes, size_t min_largest_block_bytes) {
-    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-
-    return free_internal >= min_free_bytes && largest_internal >= min_largest_block_bytes;
-}
-#endif
+// #if CONFIG_WATCHER_CAMERA_BOOT_DIAG
+// static bool has_internal_heap_headroom(size_t min_free_bytes, size_t min_largest_block_bytes) {
+//     size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+//     size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+//
+//     return free_internal >= min_free_bytes && largest_internal >= min_largest_block_bytes;
+// }
+// #endif
 
 static void on_wifi_status_changed(wifi_status_t status, const char *ssid, const char *ip_addr) {
     switch (status) {
@@ -482,37 +482,39 @@ static void init_runtime_inputs_and_restart_path(void) {
     }
 }
 
-static void run_camera_boot_diag(void) {
-#if CONFIG_WATCHER_CAMERA_BOOT_DIAG
-    esp_err_t ret;
-    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-
-    if (!has_internal_heap_headroom(CAMERA_DIAG_MIN_INTERNAL_FREE_BYTES, CAMERA_DIAG_MIN_INTERNAL_LARGEST_BYTES)) {
-        ESP_LOGW(TAG,
-                 "Skipping camera boot diagnostic due to low internal heap: free=%u largest=%u "
-                 "(need >=%u / >=%u)",
-                 (unsigned)free_internal, (unsigned)largest_internal, (unsigned)CAMERA_DIAG_MIN_INTERNAL_FREE_BYTES,
-                 (unsigned)CAMERA_DIAG_MIN_INTERNAL_LARGEST_BYTES);
-        return;
-    }
-
-    ESP_LOGI(TAG, "Camera boot diagnostic: begin");
-    ret = camera_service_init();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Camera boot diagnostic init failed: %s", esp_err_to_name(ret));
-        return;
-    }
-
-    ret = camera_service_capture_once();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Camera boot diagnostic capture failed: %s", esp_err_to_name(ret));
-        return;
-    }
-
-    ESP_LOGI(TAG, "Camera boot diagnostic: capture succeeded");
-#endif
-}
+// static void run_camera_boot_diag(void) {
+//     // Camera module intentionally disabled.
+//     // The original boot diagnostic flow is kept here in comments for easy restoration.
+//     // #if CONFIG_WATCHER_CAMERA_BOOT_DIAG
+//     //     esp_err_t ret;
+//     //     size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+//     //     size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+//     //
+//     //     if (!has_internal_heap_headroom(CAMERA_DIAG_MIN_INTERNAL_FREE_BYTES, CAMERA_DIAG_MIN_INTERNAL_LARGEST_BYTES)) {
+//     //         ESP_LOGW(TAG,
+//     //                  "Skipping camera boot diagnostic due to low internal heap: free=%u largest=%u "
+//     //                  "(need >=%u / >=%u)",
+//     //                  (unsigned)free_internal, (unsigned)largest_internal, (unsigned)CAMERA_DIAG_MIN_INTERNAL_FREE_BYTES,
+//     //                  (unsigned)CAMERA_DIAG_MIN_INTERNAL_LARGEST_BYTES);
+//     //         return;
+//     //     }
+//     //
+//     //     ESP_LOGI(TAG, "Camera boot diagnostic: begin");
+//     //     ret = camera_service_init();
+//     //     if (ret != ESP_OK) {
+//     //         ESP_LOGW(TAG, "Camera boot diagnostic init failed: %s", esp_err_to_name(ret));
+//     //         return;
+//     //     }
+//     //
+//     //     ret = camera_service_capture_once();
+//     //     if (ret != ESP_OK) {
+//     //         ESP_LOGW(TAG, "Camera boot diagnostic capture failed: %s", esp_err_to_name(ret));
+//     //         return;
+//     //     }
+//     //
+//     //     ESP_LOGI(TAG, "Camera boot diagnostic: capture succeeded");
+//     // #endif
+// }
 
 #if CONFIG_WATCHER_LOG_HEAP_DIAGNOSTICS
 static void log_heap_state(const char *stage) {
@@ -1357,7 +1359,7 @@ void app_main(void) {
     apply_idle_hint_if_needed();
     LOG_HEAP_STATE("after_ui_init");
 
-    run_camera_boot_diag();
+    // run_camera_boot_diag();
     LOG_HEAP_STATE("after_camera_diag");
     s_boot_completed = true;
     transport_sync_boot_state();
