@@ -1142,10 +1142,14 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
 
     case WEBSOCKET_EVENT_ERROR:
         if (data != NULL) {
-            ESP_LOGE(TAG, "WebSocket error: type=%d esp_err=%s tls_code=%d tls_flags=%d sock_errno=%d",
-                     data->error_handle.error_type, esp_err_to_name(data->error_handle.esp_tls_last_esp_err),
-                     data->error_handle.esp_tls_stack_err, data->error_handle.esp_tls_cert_verify_flags,
-                     data->error_handle.esp_transport_sock_errno);
+            if (data->error_handle.error_type == WEBSOCKET_ERROR_TYPE_NONE) {
+                ESP_LOGE(TAG, "WebSocket error: type=NONE (structured transport details unavailable)");
+            } else {
+                ESP_LOGE(TAG, "WebSocket error: type=%d esp_err=%s tls_code=%d tls_flags=%d sock_errno=%d",
+                         data->error_handle.error_type, esp_err_to_name(data->error_handle.esp_tls_last_esp_err),
+                         data->error_handle.esp_tls_stack_err, data->error_handle.esp_tls_cert_verify_flags,
+                         data->error_handle.esp_transport_sock_errno);
+            }
         } else {
             ESP_LOGE(TAG, "WebSocket error");
         }

@@ -1215,6 +1215,7 @@ static void transport_coordinator_tick(void) {
 
     if (ws_client_is_session_ready()) {
         transport_cache_ws_url(ws_client_get_server_url(), "ws session ready");
+        s_cached_ws_attempted_since_wifi_restore = false;
         s_cached_ws_connect_inflight = false;
         s_cached_ws_connect_started_us = 0;
         ensure_cloud_runtime_started();

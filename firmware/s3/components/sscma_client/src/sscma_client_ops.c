@@ -179,11 +179,12 @@ static void sscma_client_process(void *arg) {
             continue;
         }
         if (sscma_client_available(client, &rlen) == ESP_OK && rlen) {
-            if (rlen + client->rx_buffer.pos > client->rx_buffer.len) {
-                rlen = client->rx_buffer.len - client->rx_buffer.pos;
+            if (rlen + client->rx_buffer.pos >= client->rx_buffer.len) {
+                rlen = (client->rx_buffer.len - 1) - client->rx_buffer.pos;
                 if (rlen <= 0) {
                     ESP_LOGW(TAG, "rx buffer is full");
                     client->rx_buffer.pos = 0;
+                    client->rx_buffer.data[0] = 0;
                     continue;
                 }
             }
@@ -381,7 +382,7 @@ esp_err_t sscma_client_new(const sscma_client_io_handle_t io, const sscma_client
         }
     }
 
-    client->rx_buffer.data = (char *)malloc(config->rx_buffer_size);
+    client->rx_buffer.data = (char *)calloc(1, (size_t)config->rx_buffer_size + 1U);
     ESP_GOTO_ON_FALSE(client->rx_buffer.data, ESP_ERR_NO_MEM, err, TAG, "no mem for rx buffer");
     client->rx_buffer.pos = 0;
     client->rx_buffer.len = config->rx_buffer_size;
