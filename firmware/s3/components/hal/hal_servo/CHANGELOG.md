@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Switched the internal PWM mapping to the MS90 pulse model: `500..2500us`
   with `1500us` neutral while keeping public control angles in the existing
   `0..180` logical installation space (`90` remains neutral).
+- Raised the documented Y-axis soft limit to `170°` and aligned the README with
+  the current startup pose `X=90°`, `Y=120°`.
+- Behavior state changes and external manual control now cancel queued servo
+  motion so a new action does not have to wait for the previous loop to drain.
+
+### Added
+
+- Added `hal_servo_cancel_all()` to clear pending smooth-motion commands and
+  abort the current interpolation segment on the next step boundary.
+- Added `behavior_state_interrupt_action()` so BLE, WebSocket, and other manual
+  control paths can stop the active action loop before taking over the servos.
 
 ## [2.0.0] - 2025-03-13
 
