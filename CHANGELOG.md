@@ -11,6 +11,26 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.2.2] - 2026-04-09
+
+### Added
+- Formal `v0.2.2` release packaging for the current mainline firmware and SD-card animation asset bundles
+
+### Fixed
+- Cloud reconnect behavior is more resilient during runtime recovery
+- SSCMA RX buffer handling is hardened to reduce overflow risk on the current mainline
+
+### Changed
+- Firmware version is now tracked as `v0.2.2`
+- Current formal release baseline moves forward from `v0.2.1` to include the latest reconnect and coprocessor buffer fixes
+- Release tooling defaults now target the `v0.2.2` output path
+
+### Notes
+- Release focus: current mainline stability, especially cloud recovery and SSCMA communication safety
+- The packaged SD animation set still contains 10 generated animation types; `custom1` and `custom2` remain out of scope until source GIFs are added
+
+---
+
 ## [0.2.1] - 2026-04-08
 
 ### Added
