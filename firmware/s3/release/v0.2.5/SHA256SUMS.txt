@@ -6,4 +6,4 @@ b944171f13ea154909173123b2606aaaeb5e78fc8a07937d6ed794f74acac276 *WatcheRobot-S3
 250cd3dd3c68cefef66c54b3caacec78890f9d089980a822054a8c7ac4ca4e1a *WatcheRobot-S3-v0.2.5-esp32s3/srmodels.bin
 aa6e173b5e69fb6dce8cb38e2839e5963f510efe988ab34953ebfa0af4e7f9b2 *WatcheRobot-S3-v0.2.5-esp32s3/storage.bin
 9c38d2866b1f574cb597cc8d06f7f0f9f1a17a11b0f6936f644c37cd88e68338 *WatcheRobot-S3-v0.2.5-esp32s3/WatcheRobot-S3.bin
-7b8fecf0df0e2d1e70509947b8d2d5a0ae06ad991804bd12f43a5f0abf002542 *WatcheRobot-S3-v0.2.5-sdcard-anim.zip
+d608442f3b529647a9e437398675d5814ad39a72487cf82a3386fe64e4f7c2fe *WatcheRobot-S3-v0.2.5-sdcard-anim.zip
