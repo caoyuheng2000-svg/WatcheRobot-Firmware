@@ -30,7 +30,7 @@
           "rotation_angle": 120.0
         },
         {
-          "frame_number": 66,
+          "frame_number": 60,
           "active_axis": "z",
           "rotation_angle": 120.0
         },
@@ -99,7 +99,7 @@
         {
           "frame_number": 66,
           "active_axis": "x",
-          "rotation_angle": 110.0
+          "rotation_angle": 120.0
         }
       ]
     }

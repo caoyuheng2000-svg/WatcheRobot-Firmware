@@ -1,0 +1,9 @@
+26132f4f8c1f04a4dd50e7c4a856ab8fa339702782c94808320a1680059e0d21 *WatcheRobot-S3-v0.2.5-esp32s3.zip
+5ba32d0816031bffa99337254863ff94ed0ea67b069ae5959e645c4129f98a11 *WatcheRobot-S3-v0.2.5-esp32s3/bootloader.bin
+7b8607114556250c0b706e10a92ea00e52a3cdba2f8bb31f931a41b7ebdc02ff *WatcheRobot-S3-v0.2.5-esp32s3/flash_args.txt
+b944171f13ea154909173123b2606aaaeb5e78fc8a07937d6ed794f74acac276 *WatcheRobot-S3-v0.2.5-esp32s3/FLASHING.txt
+22ac8ed2fdc52aae3efbbe6d8506cfdea5a01e70248fdc2f6e6482b389678d8f *WatcheRobot-S3-v0.2.5-esp32s3/partition-table.bin
+250cd3dd3c68cefef66c54b3caacec78890f9d089980a822054a8c7ac4ca4e1a *WatcheRobot-S3-v0.2.5-esp32s3/srmodels.bin
+aa6e173b5e69fb6dce8cb38e2839e5963f510efe988ab34953ebfa0af4e7f9b2 *WatcheRobot-S3-v0.2.5-esp32s3/storage.bin
+9c38d2866b1f574cb597cc8d06f7f0f9f1a17a11b0f6936f644c37cd88e68338 *WatcheRobot-S3-v0.2.5-esp32s3/WatcheRobot-S3.bin
+7b8fecf0df0e2d1e70509947b8d2d5a0ae06ad991804bd12f43a5f0abf002542 *WatcheRobot-S3-v0.2.5-sdcard-anim.zip

@@ -19,7 +19,7 @@ import shutil
 from pathlib import Path
 
 
-PROJECT_VERSION = "v0.2.2"
+PROJECT_VERSION = "v0.2.5"
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 DEFAULT_SOURCE_DIR = PROJECT_ROOT / "release" / PROJECT_VERSION / "sdcard" / "anim"
