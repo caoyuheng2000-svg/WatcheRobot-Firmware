@@ -13,6 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+void mem_monitor_snapshot(const char *stage);
+
 #define TAG "SFX_SERVICE"
 
 #define SFX_MANIFEST_PATH "/spiffs/sfx/manifest.json"
@@ -463,6 +465,7 @@ static void sfx_playback_file(const char *sound_id, uint32_t generation) {
             hal_audio_set_sample_rate(16000);
         }
     }
+    mem_monitor_snapshot("after_sfx_playback");
     sfx_set_local_busy(false);
 }
 

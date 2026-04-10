@@ -38,6 +38,15 @@ void boot_anim_set_progress(int percent);
 void boot_anim_set_text(const char *text);
 
 /**
+ * @brief Set secondary detail text on boot screen
+ *
+ * Intended for compact device metadata such as BLE MAC.
+ *
+ * @param text Secondary message, or empty/NULL to hide it
+ */
+void boot_anim_set_detail_text(const char *text);
+
+/**
  * @brief Start boot intro frame playback on the boot screen
  *
  * Plays the first N frames of the given animation type in a loop until
