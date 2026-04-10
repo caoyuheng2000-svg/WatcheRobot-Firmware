@@ -9,16 +9,30 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+---
+
+## [0.2.4] - 2026-04-10
+
 ### Added
+- Formal `v0.2.4` release packaging for the current mainline firmware and SD-card animation asset bundles
 - Post-playback memory snapshots after cloud TTS completion and local SFX completion to keep heap visibility on the audio return path without reintroducing a permanent monitor task
+- Behavior-state and control-ingress hooks that allow action playback to preempt more quickly when runtime state changes arrive
 
 ### Changed
+- Firmware version is now tracked as `v0.2.4`
 - Cloud TTS playback is now decoupled from the WebSocket receive path with a dedicated playback queue and worker so audio output is less sensitive to network jitter and callback scheduling stalls
 - Runtime memory monitoring no longer keeps a background periodic task alive; memory diagnostics now rely on lifecycle and audio-path snapshots instead of a permanent low-priority sampler
+- Current formal release baseline moves forward from `v0.2.2` to include action handoff responsiveness improvements and the latest audio-path buffering hardening
 
 ### Fixed
 - Background memory monitoring no longer reserves a dedicated FreeRTOS task stack in internal RAM, reducing steady-state heap pressure on low-headroom devices
 - Audio playback teardown now leaves behind deterministic heap snapshots for post-playback analysis instead of depending on periodic warnings
+- Behavior action handoff is less likely to lag behind updated state transitions while speech and control paths are active
+
+### Notes
+- Release focus: smoother playback under cloud jitter, lower steady-state RAM pressure, and faster action handoff during runtime state changes
+- Current package still uses the existing legacy SPIFFS action data under `firmware/s3/spiffs/actions/*.json`; this release improves handoff logic without replacing the action content set
+- The packaged SD animation set still contains 10 generated animation types; `custom1` and `custom2` remain out of scope until source GIFs are added
 
 ---
 

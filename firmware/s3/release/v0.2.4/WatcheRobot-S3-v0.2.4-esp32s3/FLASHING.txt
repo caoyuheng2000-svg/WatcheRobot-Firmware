@@ -1,0 +1,27 @@
+WatcheRobot S3 firmware release package
+Version: v0.2.4
+Target: ESP32-S3 / SenseCAP Watcher
+
+Release note:
+- This is the formal v0.2.4 release for the current mainline firmware baseline.
+- It includes buffered cloud playback, lower-overhead runtime memory diagnostics, and improved action handoff responsiveness.
+- The packaged behavior actions still use the existing legacy SPIFFS action data under firmware/s3/spiffs/actions.
+- The SD-backed GIF / AnimPack runtime remains the animation baseline.
+
+Package contents:
+1. Flash bundle in this folder
+2. SD animation bundle in ../WatcheRobot-S3-v0.2.4-sdcard-anim.zip
+
+Flash layout:
+0x00000000 bootloader.bin
+0x00008000 partition-table.bin
+0x00010000 WatcheRobot-S3.bin
+0x00410000 srmodels.bin
+0x00460000 storage.bin
+
+Example flash command:
+python -m esptool --chip esp32s3 -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m 0x0 bootloader.bin 0x8000 partition-table.bin 0x10000 WatcheRobot-S3.bin 0x410000 srmodels.bin 0x460000 storage.bin
+
+SD animation deploy:
+- Extract WatcheRobot-S3-v0.2.4-sdcard-anim.zip
+- Copy the included anim directory to the SD-card root so the device sees /sdcard/anim

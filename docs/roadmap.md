@@ -1,13 +1,13 @@
 # Development Roadmap
 
-> WatcheRobot Firmware development status and next priorities, synchronized to the latest formal tag `v0.2.1`.
+> WatcheRobot Firmware development status and next priorities, synchronized to the latest formal tag `v0.2.4`.
 
 ---
 
 ## Current Baseline
 
-- Current formal release tag: `v0.2.1`
-- Baseline focus: GIF-authored animation pipeline, SD-backed `animpack` runtime, BLE provisioning, and current cloud transport recovery behavior
+- Current formal release tag: `v0.2.4`
+- Baseline focus: GIF-authored animation pipeline, SD-backed `animpack` runtime, BLE provisioning, buffered cloud audio playback, and lower-overhead runtime diagnostics
 - Current release package includes:
   - ESP32-S3 firmware flash bundle
   - SD-card animation asset bundle
@@ -140,7 +140,7 @@
 - Support hot-swapping animation assets without manual SD bundle replacement
 
 **Current context**:
-- `v0.2.1` packages SD-backed animation assets cleanly
+- `v0.2.4` packages SD-backed animation assets cleanly
 - but runtime remote asset update is still future work
 
 ---
@@ -181,8 +181,8 @@
 
 - This roadmap intentionally reflects the current real mainline state, not the older PNG-cache animation plan.
 - For the currently frozen communication baseline, see `firmware/s3/docs/COMM_PROTOCOL_FREEZE.md`.
-- For the current formal animation baseline, see the `v0.2.1` release package and related GIF / AnimPack documentation.
+- For the current formal animation baseline, see the `v0.2.4` release package and related GIF / AnimPack documentation.
 
 ---
 
-*Last updated: 2026-04-09*
+*Last updated: 2026-04-10*

@@ -22,17 +22,21 @@ WatcheRobot is an open-source AI assistant robot built on the **SenseCAP Watcher
 
 ### Current Release Track
 
-- Current release target: `v0.2.2`
-- `v0.2.2` is the recommended formal baseline for the GIF-authored animation system on the ESP32-S3 mainline:
+- Current release target: `v0.2.4`
+- `v0.2.4` is the recommended formal baseline for the GIF-authored animation system on the ESP32-S3 mainline:
   - PNG-sequence runtime playback has been replaced by SD-backed `animpack` streaming generated from GIF source assets
   - Boot animation now runs from `/sdcard/anim/boot.animpack`, and missing SD animation resources fail into a deterministic boot error path
   - UI text remains visible above animated backgrounds, and runtime GIF switches no longer flash white or show `No data`
+  - Cloud TTS playback now runs through a dedicated buffered worker instead of depending directly on WebSocket receive timing
+  - Runtime memory diagnostics now rely on lifecycle snapshots instead of a permanent background monitor task, which reduces steady-state heap pressure
+  - Action handoff latency is improved so behavior changes can preempt servo and expression playback more cleanly during mixed voice/control activity
+  - The packaged behavior actions still use the existing legacy SPIFFS action JSON set under `firmware/s3/spiffs/actions`
   - The branch still carries the reconnect hardening, Bluetooth feedback, cached WebSocket resume, audio recovery work from `v0.1.7`, and the packaged Windows flashing workflow added on main in `v0.1.8`
-- This release is suitable for repeated validation of SD-backed animation startup, on-screen text behavior, runtime state switching, and mixed local/cloud UI transitions
+- This release is suitable for repeated validation of SD-backed animation startup, on-screen text behavior, runtime state switching, buffered audio playback, and mixed local/cloud UI transitions
 - The current packaged GIF resource set includes 10 generated animation types; `custom1` and `custom2` are not included yet because their source GIFs are not present
-- Release deliverables now include both a firmware flash bundle and an SD-card animation asset bundle under `firmware/s3/release/v0.2.2`
+- Release deliverables now include both a firmware flash bundle and an SD-card animation asset bundle under `firmware/s3/release/v0.2.4`
 - Windows release ZIP flashing remains available through `tools\flash-release.cmd` and `tools\win_flasher` for packaged validation workflows
-- After `v0.2.2`, the main remaining roadmap work is:
+- After `v0.2.4`, the main remaining roadmap work is:
   - dual OTA partitioning and full firmware OTA
   - camera runtime stability and recovery hardening
   - future animation delivery refinement such as animation OTA
@@ -168,7 +172,7 @@ WatcheRobot-Firmware/
 | Document | Description |
 |----------|-------------|
 | [docs/getting-started.md](docs/getting-started.md) | Full setup guide |
-| [docs/roadmap.md](docs/roadmap.md) | Current status, completed tracks, and next priorities synchronized to `v0.2.2` |
+| [docs/roadmap.md](docs/roadmap.md) | Current status, completed tracks, and next priorities synchronized to `v0.2.4` |
 
 ### Architecture & Design
 
