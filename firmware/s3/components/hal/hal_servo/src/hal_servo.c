@@ -90,6 +90,8 @@ static TaskHandle_t s_servo_task = NULL;
 static SemaphoreHandle_t s_angle_mutex = NULL;
 static portMUX_TYPE s_cmd_seq_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_cmd_seq = 0;
+static portMUX_TYPE s_motion_cancel_lock = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t s_motion_cancel_generation = 0;
 
 /* Forward declarations */
 static void servo_task(void *arg);
@@ -109,6 +111,8 @@ static void servo_log_enqueue(const servo_cmd_msg_t *cmd);
 static void servo_log_drop(const servo_cmd_msg_t *cmd, const char *reason);
 static void servo_log_execute_start(const servo_cmd_msg_t *cmd);
 static void servo_log_execute_done(const servo_cmd_msg_t *cmd, uint32_t exec_ms);
+static uint32_t servo_cancel_generation(void);
+static bool servo_cancel_requested(uint32_t generation);
 
 /**
  * @brief Divide and round to the nearest integer.
@@ -387,6 +391,20 @@ static void servo_log_execute_done(const servo_cmd_msg_t *cmd, uint32_t exec_ms)
              current_x, current_y, (unsigned long)servo_queue_depth());
 }
 
+static uint32_t servo_cancel_generation(void) {
+    uint32_t generation;
+
+    portENTER_CRITICAL(&s_motion_cancel_lock);
+    generation = s_motion_cancel_generation;
+    portEXIT_CRITICAL(&s_motion_cancel_lock);
+
+    return generation;
+}
+
+static bool servo_cancel_requested(uint32_t generation) {
+    return servo_cancel_generation() != generation;
+}
+
 /**
  * @brief Background task for smooth servo movement.
  *
@@ -409,6 +427,7 @@ static void servo_task(void *arg) {
 
         servo_log_execute_start(&cmd);
         uint32_t exec_started_ms = servo_now_ms();
+        uint32_t cancel_generation = servo_cancel_generation();
 
         if (cmd.type == CMD_TYPE_SINGLE) {
             /* Single-axis smooth move */
@@ -457,6 +476,12 @@ static void servo_task(void *arg) {
             /* Interpolate */
             for (int i = 1; i <= num_steps; i++) {
                 int current_deg;
+
+                if (servo_cancel_requested(cancel_generation)) {
+                    ESP_LOGI(TAG, "Abort servo cmd seq=%lu type=single due_to=cancel", (unsigned long)cmd.seq_no);
+                    break;
+                }
+
                 if (i == num_steps) {
                     current_deg = target_deg;
                 } else {
@@ -513,6 +538,11 @@ static void servo_task(void *arg) {
             /* Interpolate both axes */
             for (int i = 1; i <= num_steps; i++) {
                 int current_x, current_y;
+
+                if (servo_cancel_requested(cancel_generation)) {
+                    ESP_LOGI(TAG, "Abort servo cmd seq=%lu type=sync due_to=cancel", (unsigned long)cmd.seq_no);
+                    break;
+                }
 
                 if (i == num_steps) {
                     current_x = target_x;
@@ -729,6 +759,25 @@ esp_err_t hal_servo_send_cmd(const char *id, int angle_deg, int duration_ms) {
     }
 
     return hal_servo_move_smooth(axis, angle_deg, duration_ms);
+}
+
+esp_err_t hal_servo_cancel_all(void) {
+    servo_cmd_msg_t dropped;
+
+    if (!s_initialized || s_cmd_queue == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    portENTER_CRITICAL(&s_motion_cancel_lock);
+    s_motion_cancel_generation++;
+    portEXIT_CRITICAL(&s_motion_cancel_lock);
+
+    while (xQueueReceive(s_cmd_queue, &dropped, 0) == pdTRUE) {
+        servo_log_drop(&dropped, "cancel_all");
+    }
+
+    ESP_LOGI(TAG, "Canceled servo motions; q_depth=%lu", (unsigned long)servo_queue_depth());
+    return ESP_OK;
 }
 
 int hal_servo_get_angle(servo_axis_t axis) {

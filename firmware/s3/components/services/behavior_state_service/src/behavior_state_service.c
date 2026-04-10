@@ -108,6 +108,7 @@ typedef struct {
     char current_state_id[BEHAVIOR_STATE_ID_LEN];
     char current_action_id[BEHAVIOR_STATE_ID_LEN];
     uint32_t state_started_ms;
+    uint32_t action_started_ms;
     int next_motion_index;
     int next_action_motion_index;
     int next_expression_index;
@@ -1211,6 +1212,7 @@ static void behavior_reset_runtime_locked(void) {
     behavior_copy_string(s_ctx.current_state_id, sizeof(s_ctx.current_state_id), s_ctx.catalog.default_state);
     s_ctx.current_action_id[0] = '\0';
     s_ctx.state_started_ms = behavior_now_ms();
+    s_ctx.action_started_ms = s_ctx.state_started_ms;
     s_ctx.next_motion_index = 0;
     s_ctx.next_action_motion_index = 0;
     s_ctx.next_expression_index = 0;
@@ -1333,8 +1335,40 @@ static void behavior_refresh_display_locked(behavior_display_request_t *request)
     behavior_capture_display_request_locked(request);
 }
 
+static bool behavior_stop_current_action_locked(const char *source) {
+    if (s_ctx.current_action == NULL) {
+        return false;
+    }
+
+    ESP_LOGI(TAG, "Interrupt action loop '%s' for state '%s' via %s",
+             s_ctx.current_action_id[0] != '\0' ? s_ctx.current_action_id : "<none>",
+             s_ctx.current_state_id[0] != '\0' ? s_ctx.current_state_id : s_ctx.catalog.default_state,
+             (source != NULL && source[0] != '\0') ? source : "external_control");
+
+    s_ctx.current_action = NULL;
+    s_ctx.current_action_id[0] = '\0';
+    s_ctx.next_action_motion_index = 0;
+    s_ctx.action_started_ms = behavior_now_ms();
+    if (hal_servo_cancel_all() != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to cancel servo motions while interrupting action");
+    }
+    return true;
+}
+
 static bool behavior_should_override_state_motion_locked(void) {
     return s_ctx.current_action != NULL;
+}
+
+static bool behavior_should_loop_action_locked(void) {
+    if (s_ctx.current_action == NULL || s_ctx.current_state == NULL) {
+        return false;
+    }
+
+    return s_ctx.current_state->loop || s_ctx.current_state->hold_until_replaced;
+}
+
+static uint32_t behavior_action_elapsed_ms_locked(uint32_t now_ms) {
+    return now_ms - s_ctx.action_started_ms;
 }
 
 static void behavior_log_action_start_locked(const char *state_id, const behavior_action_def_t *action_def) {
@@ -1431,12 +1465,14 @@ static bool behavior_all_action_events_dispatched_locked(void) {
 
 static void behavior_dispatch_due_events_locked(uint32_t now_ms, behavior_display_request_t *request) {
     uint32_t elapsed_ms;
+    uint32_t action_elapsed_ms;
 
     if (s_ctx.current_state == NULL) {
         return;
     }
 
     elapsed_ms = now_ms - s_ctx.state_started_ms;
+    action_elapsed_ms = behavior_action_elapsed_ms_locked(now_ms);
 
     if (!behavior_should_override_state_motion_locked()) {
         while (s_ctx.next_motion_index < s_ctx.current_state->motion_count &&
@@ -1447,7 +1483,7 @@ static void behavior_dispatch_due_events_locked(uint32_t now_ms, behavior_displa
     }
 
     while (s_ctx.current_action != NULL && s_ctx.next_action_motion_index < s_ctx.current_action->motion_count &&
-           s_ctx.current_action->motion[s_ctx.next_action_motion_index].at_ms <= elapsed_ms) {
+           s_ctx.current_action->motion[s_ctx.next_action_motion_index].at_ms <= action_elapsed_ms) {
         const behavior_motion_event_t *event = &s_ctx.current_action->motion[s_ctx.next_action_motion_index];
 
         ESP_LOGI(TAG, "Dispatch action '%s': at_ms=%lu x=%d y=%d duration_ms=%d",
@@ -1529,12 +1565,19 @@ static esp_err_t behavior_schedule_state_locked(const char *state_id, const char
             return ESP_OK;
         }
 
+        if (s_ctx.current_state != NULL || s_ctx.current_action != NULL) {
+            if (hal_servo_cancel_all() != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to cancel servo motions before state/action switch");
+            }
+        }
+
         s_ctx.current_state = NULL;
         s_ctx.current_action = action_def;
         behavior_copy_string(s_ctx.current_state_id, sizeof(s_ctx.current_state_id), s_ctx.catalog.default_state);
         behavior_copy_string(s_ctx.current_action_id, sizeof(s_ctx.current_action_id),
                              action_def != NULL ? action_def->id : NULL);
         s_ctx.state_started_ms = now_ms;
+        s_ctx.action_started_ms = now_ms;
         s_ctx.next_motion_index = 0;
         s_ctx.next_action_motion_index = 0;
         s_ctx.next_expression_index = 0;
@@ -1581,12 +1624,19 @@ static esp_err_t behavior_schedule_state_locked(const char *state_id, const char
         return ESP_OK;
     }
 
+    if (s_ctx.current_state != NULL || s_ctx.current_action != NULL) {
+        if (hal_servo_cancel_all() != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to cancel servo motions before state/action switch");
+        }
+    }
+
     s_ctx.current_state = state_def;
     s_ctx.current_action = action_def;
     behavior_copy_string(s_ctx.current_state_id, sizeof(s_ctx.current_state_id), state_def->id);
     behavior_copy_string(s_ctx.current_action_id, sizeof(s_ctx.current_action_id),
                          action_def != NULL ? action_def->id : NULL);
     s_ctx.state_started_ms = now_ms;
+    s_ctx.action_started_ms = now_ms;
     s_ctx.next_motion_index = 0;
     s_ctx.next_action_motion_index = 0;
     s_ctx.next_expression_index = 0;
@@ -1643,16 +1693,30 @@ static void behavior_task(void *arg) {
 
             if (s_ctx.current_state != NULL) {
                 uint32_t elapsed_ms;
+                uint32_t action_elapsed_ms;
                 uint32_t done_at_ms;
 
                 behavior_dispatch_due_events_locked(now_ms, &display_request);
                 elapsed_ms = now_ms - s_ctx.state_started_ms;
+                action_elapsed_ms = behavior_action_elapsed_ms_locked(now_ms);
+
+                if (behavior_should_loop_action_locked() && s_ctx.current_action != NULL &&
+                    s_ctx.current_action->total_duration_ms > 0 && behavior_all_action_events_dispatched_locked() &&
+                    action_elapsed_ms >= s_ctx.current_action->total_duration_ms) {
+                    ESP_LOGI(TAG, "Looping action '%s' for state '%s'",
+                             s_ctx.current_action_id[0] != '\0' ? s_ctx.current_action_id : "<none>",
+                             s_ctx.current_state_id[0] != '\0' ? s_ctx.current_state_id : s_ctx.catalog.default_state);
+                    s_ctx.action_started_ms = now_ms;
+                    s_ctx.next_action_motion_index = 0;
+                    behavior_dispatch_due_events_locked(now_ms, &display_request);
+                    action_elapsed_ms = behavior_action_elapsed_ms_locked(now_ms);
+                }
 
                 if (s_ctx.current_state->loop) {
                     if (s_ctx.current_state->timeline_end_ms > 0 && behavior_all_state_events_dispatched_locked() &&
                         behavior_all_action_events_dispatched_locked() &&
                         elapsed_ms >= s_ctx.current_state->timeline_end_ms &&
-                        (s_ctx.current_action == NULL || elapsed_ms >= s_ctx.current_action->total_duration_ms)) {
+                        (s_ctx.current_action == NULL || action_elapsed_ms >= s_ctx.current_action->total_duration_ms)) {
                         s_ctx.state_started_ms = now_ms;
                         s_ctx.next_motion_index = 0;
                         s_ctx.next_expression_index = 0;
@@ -1923,10 +1987,28 @@ bool behavior_state_is_action_active(void) {
     }
 
     if (s_ctx.current_action != NULL && s_ctx.current_action->total_duration_ms > 0) {
-        elapsed_ms = behavior_now_ms() - s_ctx.state_started_ms;
+        elapsed_ms = behavior_now_ms() - s_ctx.action_started_ms;
         active = elapsed_ms < s_ctx.current_action->total_duration_ms;
     }
 
     behavior_unlock();
     return active;
+}
+
+esp_err_t behavior_state_interrupt_action(const char *source) {
+    esp_err_t ret = ESP_OK;
+
+    if (behavior_state_init() != ESP_OK) {
+        return ESP_FAIL;
+    }
+    if (!behavior_lock()) {
+        return ESP_FAIL;
+    }
+
+    if (!behavior_stop_current_action_locked(source)) {
+        ret = ESP_ERR_NOT_FOUND;
+    }
+
+    behavior_unlock();
+    return ret;
 }

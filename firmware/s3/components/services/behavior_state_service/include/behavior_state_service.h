@@ -30,6 +30,17 @@ const char *behavior_state_get_current(void);
 bool behavior_state_is_busy(void);
 bool behavior_state_has_action(const char *action_id);
 bool behavior_state_is_action_active(void);
+/**
+ * @brief Interrupt the currently active action motion track.
+ *
+ * Stops the behavior-layer action loop and asks the servo HAL to discard any
+ * queued motion segments that still belong to the interrupted action. The
+ * state itself can remain active; this only targets action motion playback.
+ *
+ * @param source Optional short source string for diagnostics/logging
+ * @return ESP_OK if an action was interrupted, ESP_ERR_NOT_FOUND if idle
+ */
+esp_err_t behavior_state_interrupt_action(const char *source);
 
 #ifdef __cplusplus
 }

@@ -24,6 +24,7 @@
 #include <strings.h>
 
 #include "control_ingress.h"
+#include "behavior_state_service.h"
 #include "esp_bt.h"
 #include "esp_mac.h"
 #include "esp_bt_main.h"
@@ -631,6 +632,15 @@ static void ble_send_text_notification(const char *text)
     }
 }
 
+static void ble_interrupt_action_before_servo(void)
+{
+    esp_err_t ret = behavior_state_interrupt_action("ble_servo_control");
+
+    if (ret != ESP_OK && ret != ESP_ERR_NOT_FOUND) {
+        ESP_LOGW(TAG, "BLE servo interrupt action failed: %s", esp_err_to_name(ret));
+    }
+}
+
 static esp_err_t ble_parse_and_send_servo(char axis, const char *payload)
 {
     control_servo_request_t req = {0};
@@ -658,6 +668,7 @@ static esp_err_t ble_parse_and_send_servo(char axis, const char *payload)
     req.x_deg = (int)angle;
     req.y_deg = (int)angle;
     req.duration_ms = duration_ms;
+    ble_interrupt_action_before_servo();
     return control_ingress_submit_servo(&req);
 }
 
@@ -716,6 +727,7 @@ static esp_err_t ble_parse_servo_move(const char *params)
     req.x_deg = target;
     req.y_deg = target;
     req.duration_ms = CONFIG_WATCHER_BLE_CMD_DEFAULT_DURATION_MS;
+    ble_interrupt_action_before_servo();
     return control_ingress_submit_servo(&req);
 }
 
@@ -852,6 +864,7 @@ static esp_err_t ble_process_json_payload(const char *json_text,
             return ESP_ERR_INVALID_ARG;
         }
 
+        ble_interrupt_action_before_servo();
         ret = control_ingress_submit_servo(&req);
         cJSON_Delete(root);
         if (ret == ESP_ERR_TIMEOUT) {

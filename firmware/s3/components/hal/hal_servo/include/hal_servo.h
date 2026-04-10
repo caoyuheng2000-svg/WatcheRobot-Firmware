@@ -97,6 +97,18 @@ esp_err_t hal_servo_move_sync(int x_deg, int y_deg, int duration_ms);
 esp_err_t hal_servo_send_cmd(const char *id, int angle_deg, int duration_ms);
 
 /**
+ * @brief Cancel in-flight and queued smooth servo motions.
+ *
+ * Clears the pending motion queue and asks the background interpolation task
+ * to stop the currently executing smooth segment on its next interpolation
+ * step boundary. This is used by higher-level behavior/state switching so a
+ * new action does not have to wait for the previous loop's queued motions.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if servo HAL is not ready
+ */
+esp_err_t hal_servo_cancel_all(void);
+
+/**
  * @brief Get current servo angle.
  *
  * @param axis Servo axis
