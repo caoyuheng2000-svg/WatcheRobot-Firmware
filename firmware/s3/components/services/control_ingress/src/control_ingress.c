@@ -311,6 +311,8 @@ esp_err_t control_ingress_init(void) {
 }
 
 esp_err_t control_ingress_submit_servo(const control_servo_request_t *req) {
+    esp_err_t interrupt_ret;
+
     if (req == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -325,6 +327,11 @@ esp_err_t control_ingress_submit_servo(const control_servo_request_t *req) {
     }
     if (req->has_y && (req->y_deg < 0 || req->y_deg > 180)) {
         return ESP_ERR_INVALID_ARG;
+    }
+
+    interrupt_ret = behavior_state_interrupt_action("control_ingress_servo");
+    if (interrupt_ret != ESP_OK && interrupt_ret != ESP_ERR_NOT_FOUND) {
+        ESP_LOGW(TAG, "Failed to interrupt action loop before servo control: %s", esp_err_to_name(interrupt_ret));
     }
 
     if (req->has_x && req->has_y) {

@@ -9,6 +9,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Post-playback memory snapshots after cloud TTS completion and local SFX completion to keep heap visibility on the audio return path without reintroducing a permanent monitor task
+
+### Changed
+- Cloud TTS playback is now decoupled from the WebSocket receive path with a dedicated playback queue and worker so audio output is less sensitive to network jitter and callback scheduling stalls
+- Runtime memory monitoring no longer keeps a background periodic task alive; memory diagnostics now rely on lifecycle and audio-path snapshots instead of a permanent low-priority sampler
+
+### Fixed
+- Background memory monitoring no longer reserves a dedicated FreeRTOS task stack in internal RAM, reducing steady-state heap pressure on low-headroom devices
+- Audio playback teardown now leaves behind deterministic heap snapshots for post-playback analysis instead of depending on periodic warnings
+
 ---
 
 ## [0.2.2] - 2026-04-09

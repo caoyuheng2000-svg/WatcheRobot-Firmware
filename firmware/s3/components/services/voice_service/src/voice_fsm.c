@@ -166,7 +166,7 @@ static void vad_reset(void) {
     g_vad_silence_frames = 0;
     g_vad_speech_frames = 0;
     g_vad_enabled = true;
-    ESP_LOGI(TAG, "VAD reset, silence_threshold=%d frames, rms_threshold=%d, min_speech=%d frames", VAD_SILENCE_FRAMES,
+    ESP_LOGD(TAG, "VAD reset, silence_threshold=%d frames, rms_threshold=%d, min_speech=%d frames", VAD_SILENCE_FRAMES,
              VAD_RMS_THRESHOLD, VAD_MIN_SPEECH_FRAMES);
 }
 
@@ -195,7 +195,7 @@ static bool vad_process_frame(int rms) {
 
         /* Log every 10 silent frames */
         if (g_vad_silence_frames % 10 == 0) {
-            ESP_LOGI(TAG, "VAD: silence_frames=%d/%d, rms=%d (threshold=%d)", g_vad_silence_frames, VAD_SILENCE_FRAMES,
+            ESP_LOGD(TAG, "VAD: silence_frames=%d/%d, rms=%d (threshold=%d)", g_vad_silence_frames, VAD_SILENCE_FRAMES,
                      rms, VAD_RMS_THRESHOLD);
         }
 
@@ -212,7 +212,7 @@ static bool vad_process_frame(int rms) {
 
         /* Log every 20 speech frames */
         if (g_vad_speech_frames % 20 == 0) {
-            ESP_LOGI(TAG, "VAD: speech_frames=%d, rms=%d", g_vad_speech_frames, rms);
+            ESP_LOGD(TAG, "VAD: speech_frames=%d, rms=%d", g_vad_speech_frames, rms);
         }
     }
 

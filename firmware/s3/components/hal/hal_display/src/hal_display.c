@@ -950,7 +950,8 @@ int hal_display_set_text_with_style(const char *text, int font_size, bool alert_
 #define MAX_DISPLAY_CHARS 30
     char truncated[MAX_DISPLAY_CHARS + 4];
     int len = strlen(text);
-    bool should_truncate = !hal_display_text_has_non_ascii(text) && len > MAX_DISPLAY_CHARS;
+    bool has_line_break = strchr(text, '\n') != NULL;
+    bool should_truncate = !has_line_break && !hal_display_text_has_non_ascii(text) && len > MAX_DISPLAY_CHARS;
     if (should_truncate) {
         strncpy(truncated, text, MAX_DISPLAY_CHARS);
         strcpy(truncated + MAX_DISPLAY_CHARS, "...");

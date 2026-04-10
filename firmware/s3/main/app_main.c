@@ -22,6 +22,7 @@
 #include "esp_lvgl_port.h"
 #include "hal_display.h"
 #include "hal_servo.h"
+#include "mem_monitor.h"
 #include "ota_service.h"
 #include "sensecap-watcher.h"
 #include "voice_service.h"
@@ -173,10 +174,42 @@ static void log_firmware_version(void) {
              app_desc->idf_ver);
 }
 
-static void on_ble_connection_changed(bool connected);
-#if CONFIG_WATCHER_LOG_HEAP_DIAGNOSTICS
-static void log_heap_state(const char *stage);
+static void log_ble_mac_at_boot(const char *stage) {
+    char mac_str[18] = {0};
+    esp_err_t ret = ble_service_get_local_mac(mac_str, sizeof(mac_str));
+    char boot_detail[32] = {0};
+
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "BLE MAC @ %s: %s", stage ? stage : "boot", mac_str);
+        snprintf(boot_detail, sizeof(boot_detail), "BLE %s", mac_str);
+        boot_anim_set_detail_text(boot_detail);
+    } else {
+        ESP_LOGW(TAG, "BLE MAC unavailable @ %s: %s", stage ? stage : "boot", esp_err_to_name(ret));
+        boot_anim_set_detail_text("BLE unavailable");
+    }
+}
+
+static const char *get_wifi_setup_hint_text(void) {
+    static char hint_text[96];
+    char mac_str[18] = {0};
+
+    if (ble_service_get_local_mac(mac_str, sizeof(mac_str)) == ESP_OK) {
+        snprintf(hint_text, sizeof(hint_text), "Reconnect BLE to set Wi-Fi\n%s", mac_str);
+        return hint_text;
+    }
+
+    return "Reconnect BLE to set Wi-Fi";
+}
+
+static void configure_runtime_log_levels(void) {
+#if CONFIG_WATCHER_RUNTIME_QUIET_LOGS
+    esp_log_level_set("*", ESP_LOG_WARN);
+    esp_log_level_set(TAG, ESP_LOG_INFO);
+    esp_log_level_set("MEM_MON", ESP_LOG_INFO);
 #endif
+}
+
+static void on_ble_connection_changed(bool connected);
 static void transport_cancel_discovery(const char *reason);
 static void transport_stop_ws(const char *reason);
 static void transport_set_ble_recovery_advertising_paused(bool paused, const char *reason);
@@ -191,11 +224,7 @@ static void boot_halt_with_error(const char *error_msg);
 static void log_directory_contents(const char *path);
 static int boot_prepare_animation_assets(void);
 
-#if CONFIG_WATCHER_LOG_HEAP_DIAGNOSTICS
-#define LOG_HEAP_STATE(stage) log_heap_state(stage)
-#else
-#define LOG_HEAP_STATE(stage) ((void)0)
-#endif
+#define LOG_HEAP_STATE(stage) mem_monitor_snapshot(stage)
 
 static bool transport_has_wifi_resume_headroom_with_log(bool log_failure) {
     size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -516,21 +545,6 @@ static void init_runtime_inputs_and_restart_path(void) {
 //     // #endif
 // }
 
-#if CONFIG_WATCHER_LOG_HEAP_DIAGNOSTICS
-static void log_heap_state(const char *stage) {
-    size_t free_8bit = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-    size_t largest_8bit = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    size_t free_spiram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-    size_t largest_spiram = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
-
-    ESP_LOGI(TAG, "Heap @ %s: 8bit=%u KB (largest %u KB), internal=%u KB (largest %u KB), psram=%u KB (largest %u KB)",
-             stage, (unsigned)(free_8bit / 1024U), (unsigned)(largest_8bit / 1024U), (unsigned)(free_internal / 1024U),
-             (unsigned)(largest_internal / 1024U), (unsigned)(free_spiram / 1024U), (unsigned)(largest_spiram / 1024U));
-}
-#endif
-
 static void transport_set_ble_recovery_advertising_paused(bool paused, const char *reason) {
     esp_err_t err;
 
@@ -797,7 +811,7 @@ static idle_hint_view_t get_idle_hint_view(idle_hint_mode_t mode) {
         return (idle_hint_view_t){.text = "BLE connected", .font_size = 0, .alert = false};
 
     case IDLE_HINT_WIFI_SETUP_REQUIRED:
-        return (idle_hint_view_t){.text = "Reconnect BLE to set Wi-Fi", .font_size = 20, .alert = true};
+        return (idle_hint_view_t){.text = get_wifi_setup_hint_text(), .font_size = 14, .alert = true};
 
     case IDLE_HINT_WIFI_RECOVERING:
         return (idle_hint_view_t){.text = "Reconnecting Wi-Fi...", .font_size = 22, .alert = false};
@@ -1273,22 +1287,30 @@ static void transport_coordinator_tick(void) {
 void app_main(void) {
     int boot_frame_count = 0;
 
+    configure_runtime_log_levels();
+    mem_monitor_init();
     ESP_LOGI(TAG, "WatcheRobot S3 v2.0 starting");
     log_firmware_version();
+    log_ble_mac_at_boot("startup");
+    LOG_HEAP_STATE("app_start");
 
     /* 1. Minimal display init for boot animation */
     if (hal_display_minimal_init() != 0) {
         ESP_LOGE(TAG, "Failed to initialize display");
         return;
     }
+    LOG_HEAP_STATE("after_minimal_display");
 
     /* 2. Show boot animation */
     boot_anim_init();
     boot_anim_set_text("Initializing...");
+    boot_anim_set_detail_text("");
     boot_anim_set_progress(0);
+    log_ble_mac_at_boot("boot_screen");
 
     /* 3. Mount SD and validate animation assets before proceeding. */
     boot_frame_count = boot_prepare_animation_assets();
+    LOG_HEAP_STATE("after_anim_assets");
     boot_anim_set_text("Boot...");
     boot_anim_start_intro(EMOJI_ANIM_BOOT, boot_frame_count, BOOT_ANIM_INTERVAL_MS);
     boot_anim_set_text("Preparing...");
@@ -1307,6 +1329,7 @@ void app_main(void) {
         ESP_LOGE(TAG, "Control ingress init failed");
         boot_halt_with_error("Control init failed");
     }
+    LOG_HEAP_STATE("after_control_ingress");
 
     /* 5.5 BLE control + provisioning */
     boot_anim_set_progress(35);
@@ -1314,6 +1337,7 @@ void app_main(void) {
     {
         esp_err_t ble_ret = ble_service_init();
         if (ble_ret == ESP_OK) {
+            log_ble_mac_at_boot("after_ble_init");
             ble_service_register_connection_callback(on_ble_connection_changed);
             ble_ret = ble_service_start_advertising();
             if (ble_ret != ESP_OK) {
@@ -1365,6 +1389,7 @@ void app_main(void) {
     transport_sync_boot_state();
     ESP_LOGI(TAG, "WatcheRobot ready (transport=%s, ble=%s)", transport_state_to_string(s_transport_state),
              ble_service_is_connected() ? "connected" : "advertising");
+    LOG_HEAP_STATE("ready");
 
     /* 10. Mark OTA partition valid (prevent rollback after successful boot) */
     ota_service_mark_valid();

@@ -22,6 +22,7 @@ static lv_obj_t *boot_screen = NULL;
 static lv_obj_t *progress_arc = NULL;
 static lv_obj_t *percent_label = NULL;
 static lv_obj_t *status_label = NULL;
+static lv_obj_t *detail_label = NULL;
 static lv_obj_t *error_img = NULL;
 static lv_obj_t *countdown_label = NULL;
 static lv_obj_t *intro_img = NULL;
@@ -57,6 +58,9 @@ static void boot_anim_configure_image(lv_obj_t *img_obj) {
 static void boot_anim_raise_text_layers_locked(void) {
     if (status_label != NULL) {
         lv_obj_move_foreground(status_label);
+    }
+    if (detail_label != NULL) {
+        lv_obj_move_foreground(detail_label);
     }
     if (percent_label != NULL) {
         lv_obj_move_foreground(percent_label);
@@ -109,6 +113,14 @@ void boot_anim_init(void) {
     lv_obj_set_style_text_color(status_label, lv_color_white(), 0);
     lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(status_label, LV_ALIGN_CENTER, 0, -150);
+
+    /* Secondary detail label (under status text) */
+    detail_label = lv_label_create(boot_screen);
+    lv_label_set_text(detail_label, "");
+    lv_obj_set_style_text_color(detail_label, lv_color_hex(0x9EA6B0), 0);
+    lv_obj_set_style_text_align(detail_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(detail_label, LV_ALIGN_CENTER, 0, -122);
+    lv_obj_add_flag(detail_label, LV_OBJ_FLAG_HIDDEN);
 
     /* Percentage label (bottom center) */
     percent_label = lv_label_create(boot_screen);
@@ -215,6 +227,22 @@ void boot_anim_set_text(const char *text) {
         lv_label_set_text(status_label, text);
         lvgl_port_unlock();
     }
+}
+
+void boot_anim_set_detail_text(const char *text) {
+    if (in_error_mode || detail_label == NULL) {
+        return;
+    }
+
+    lvgl_port_lock(0);
+    if (text != NULL && text[0] != '\0') {
+        lv_label_set_text(detail_label, text);
+        lv_obj_clear_flag(detail_label, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_label_set_text(detail_label, "");
+        lv_obj_add_flag(detail_label, LV_OBJ_FLAG_HIDDEN);
+    }
+    lvgl_port_unlock();
 }
 
 /* ------------------------------------------------------------------ */
@@ -345,6 +373,7 @@ void boot_anim_finish(void) {
     progress_arc = NULL;
     percent_label = NULL;
     status_label = NULL;
+    detail_label = NULL;
     error_img = NULL;
     countdown_label = NULL;
     lvgl_port_unlock();

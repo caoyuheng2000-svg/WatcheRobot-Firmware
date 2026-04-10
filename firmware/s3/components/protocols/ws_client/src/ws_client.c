@@ -15,6 +15,7 @@
 #include "esp_websocket_client.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "hal_audio.h"
@@ -26,6 +27,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+void mem_monitor_snapshot(const char *stage);
 
 #define TAG "WS_CLIENT"
 
@@ -49,6 +52,12 @@
 #define WS_AUDIO_WORKER_PRIO 6
 #define WS_AUDIO_WORKER_WAIT_MS 20
 #define WS_AUDIO_WORKER_EXIT_WAIT_MS 300
+#define WS_TTS_FRAME_BYTES 4096
+#define WS_TTS_QUEUE_DEPTH 8
+#define WS_TTS_WORKER_STACK 4096
+#define WS_TTS_WORKER_PRIO 7
+#define WS_TTS_WORKER_WAIT_MS 20
+#define WS_TTS_START_BUFFER_FRAMES 2U
 #define WS_HELLO_UI_MIN_INTERNAL_FREE_BYTES (24U * 1024U)
 #define WS_HELLO_UI_MIN_INTERNAL_LARGEST_BYTES (12U * 1024U)
 
@@ -74,9 +83,16 @@ typedef struct {
     uint64_t enqueued_us;
 } ws_audio_frame_slot_t;
 
+typedef struct {
+    uint8_t data[WS_TTS_FRAME_BYTES];
+    uint16_t len;
+    uint64_t enqueued_us;
+} ws_tts_frame_slot_t;
+
 /* Audio queue payloads do not need DMA-capable internal RAM; keep them in PSRAM
  * so LCD/SPI and websocket runtime retain more internal headroom. */
 EXT_RAM_BSS_ATTR static ws_audio_frame_slot_t s_audio_frame_pool[WS_AUDIO_QUEUE_DEPTH];
+EXT_RAM_BSS_ATTR static ws_tts_frame_slot_t s_tts_frame_pool[WS_TTS_QUEUE_DEPTH];
 static QueueHandle_t s_audio_free_slots = NULL;
 static QueueHandle_t s_audio_pending_slots = NULL;
 static SemaphoreHandle_t s_audio_slot_lock = NULL;
@@ -93,6 +109,14 @@ static uint32_t s_audio_sent_frames = 0;
 static uint32_t s_audio_dropped_frames = 0;
 static uint32_t s_audio_high_watermark = 0;
 static uint32_t s_audio_last_queue_delay_us = 0;
+static QueueHandle_t s_tts_free_slots = NULL;
+static QueueHandle_t s_tts_pending_slots = NULL;
+static SemaphoreHandle_t s_tts_queue_lock = NULL;
+static TaskHandle_t s_tts_worker_task = NULL;
+static volatile bool s_tts_worker_running = false;
+static bool s_tts_end_pending = false;
+static uint32_t s_tts_dropped_frames = 0;
+static uint32_t s_tts_high_watermark = 0;
 
 typedef struct {
     char *buffer;
@@ -134,6 +158,11 @@ static int ws_send_binary_packet(ws_frame_type_t frame_type, uint8_t flags, cons
 static int ws_send_audio_packet(const uint8_t *data, size_t len, uint8_t flags);
 static bool ws_audio_session_ready(void);
 static bool ws_client_has_hello_ui_headroom(void);
+static esp_err_t ws_tts_runtime_init(void);
+static void ws_tts_queue_reset_locked(void);
+static void ws_tts_worker_task(void *arg);
+static void ws_finish_tts_playback(void);
+static bool ws_prepare_tts_playback(bool recovering_existing_stream);
 
 static void ws_log_send_blocked(bool binary, int len, bool allow_before_session) {
     int64_t now_us = esp_timer_get_time();
@@ -168,6 +197,76 @@ static bool ws_client_has_hello_ui_headroom(void) {
 
     return free_internal >= WS_HELLO_UI_MIN_INTERNAL_FREE_BYTES &&
            largest_internal >= WS_HELLO_UI_MIN_INTERNAL_LARGEST_BYTES;
+}
+
+static void ws_tts_queue_reset_locked(void) {
+    uint8_t slot_idx;
+
+    if (s_tts_free_slots == NULL || s_tts_pending_slots == NULL) {
+        return;
+    }
+
+    xQueueReset(s_tts_free_slots);
+    xQueueReset(s_tts_pending_slots);
+    for (slot_idx = 0; slot_idx < WS_TTS_QUEUE_DEPTH; ++slot_idx) {
+        (void)xQueueSendToBack(s_tts_free_slots, &slot_idx, 0);
+    }
+
+    s_tts_end_pending = false;
+    s_tts_dropped_frames = 0;
+    s_tts_high_watermark = 0;
+}
+
+static esp_err_t ws_tts_runtime_init(void) {
+    bool need_reset = false;
+
+    if (s_tts_queue_lock == NULL) {
+        s_tts_queue_lock = xSemaphoreCreateMutex();
+        if (s_tts_queue_lock == NULL) {
+            ESP_LOGE(TAG, "failed to create tts queue lock");
+            return ESP_FAIL;
+        }
+        need_reset = true;
+    }
+
+    if (s_tts_free_slots == NULL) {
+        s_tts_free_slots = xQueueCreate(WS_TTS_QUEUE_DEPTH, sizeof(uint8_t));
+        if (s_tts_free_slots == NULL) {
+            ESP_LOGE(TAG, "failed to create tts free slot queue");
+            return ESP_FAIL;
+        }
+        need_reset = true;
+    }
+
+    if (s_tts_pending_slots == NULL) {
+        s_tts_pending_slots = xQueueCreate(WS_TTS_QUEUE_DEPTH, sizeof(uint8_t));
+        if (s_tts_pending_slots == NULL) {
+            ESP_LOGE(TAG, "failed to create tts pending queue");
+            return ESP_FAIL;
+        }
+        need_reset = true;
+    }
+
+    if (s_tts_worker_task == NULL) {
+        s_tts_worker_running = true;
+        if (xTaskCreate(ws_tts_worker_task, "ws_tts_play", WS_TTS_WORKER_STACK, NULL, WS_TTS_WORKER_PRIO,
+                        &s_tts_worker_task) != pdPASS) {
+            s_tts_worker_running = false;
+            ESP_LOGE(TAG, "failed to create tts playback worker");
+            return ESP_FAIL;
+        }
+        need_reset = true;
+    } else if (!s_tts_worker_running) {
+        s_tts_worker_running = true;
+        need_reset = true;
+    }
+
+    if (need_reset && xSemaphoreTake(s_tts_queue_lock, portMAX_DELAY) == pdTRUE) {
+        ws_tts_queue_reset_locked();
+        xSemaphoreGive(s_tts_queue_lock);
+    }
+
+    return ESP_OK;
 }
 
 static void ws_audio_update_stats_locked(void) {
@@ -477,6 +576,78 @@ static void ws_audio_runtime_deinit(void) {
     memset(&s_last_audio_queue_stats, 0, sizeof(s_last_audio_queue_stats));
 }
 
+static void ws_tts_worker_task(void *arg) {
+    uint8_t slot_idx = 0;
+
+    (void)arg;
+
+    while (s_tts_worker_running) {
+        bool have_slot = false;
+        bool should_finish = false;
+
+        if (s_tts_queue_lock != NULL &&
+            xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(WS_TTS_WORKER_WAIT_MS)) == pdTRUE) {
+            if (s_tts_pending_slots != NULL) {
+                uint32_t pending = (uint32_t)uxQueueMessagesWaiting(s_tts_pending_slots);
+
+                if (pending > 0U) {
+                    if (s_tts_playing || pending >= WS_TTS_START_BUFFER_FRAMES || s_tts_end_pending) {
+                        have_slot = (xQueueReceive(s_tts_pending_slots, &slot_idx, 0) == pdTRUE);
+                    }
+                } else if (s_tts_end_pending) {
+                    s_tts_end_pending = false;
+                    should_finish = true;
+                }
+            }
+
+            xSemaphoreGive(s_tts_queue_lock);
+        }
+
+        if (have_slot) {
+            ws_tts_frame_slot_t *slot = &s_tts_frame_pool[slot_idx];
+            int written;
+
+            if (!s_tts_playing || !hal_audio_is_running() || !hal_audio_is_playback_mode()) {
+                if (!ws_prepare_tts_playback(s_tts_playing)) {
+                    if (s_tts_queue_lock != NULL &&
+                        xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(WS_TTS_WORKER_WAIT_MS)) == pdTRUE) {
+                        if (s_tts_free_slots != NULL) {
+                            (void)xQueueSendToBack(s_tts_free_slots, &slot_idx, 0);
+                        }
+                        xSemaphoreGive(s_tts_queue_lock);
+                    }
+                    continue;
+                }
+            }
+
+            written = hal_audio_write(slot->data, slot->len);
+            if (written != (int)slot->len) {
+                ESP_LOGW(TAG, "TTS playback incomplete: %d/%u", written, (unsigned int)slot->len);
+            }
+
+            if (s_tts_queue_lock != NULL &&
+                xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(WS_TTS_WORKER_WAIT_MS)) == pdTRUE) {
+                if (s_tts_free_slots != NULL) {
+                    (void)xQueueSendToBack(s_tts_free_slots, &slot_idx, 0);
+                }
+                xSemaphoreGive(s_tts_queue_lock);
+            }
+            continue;
+        }
+
+        if (should_finish) {
+            ws_finish_tts_playback();
+            continue;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(WS_TTS_WORKER_WAIT_MS));
+    }
+
+    s_tts_worker_task = NULL;
+    s_tts_worker_running = false;
+    vTaskDelete(NULL);
+}
+
 static void ws_write_u32_le(uint8_t *dst, uint32_t value) {
     dst[0] = (uint8_t)(value & 0xFF);
     dst[1] = (uint8_t)((value >> 8) & 0xFF);
@@ -512,6 +683,11 @@ static void ws_reset_media_state(void) {
     s_audio_upload_active = false;
     s_ota_binary_nacked = false;
     sfx_service_set_cloud_audio_busy(false);
+
+    if (s_tts_queue_lock != NULL && xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
+        ws_tts_queue_reset_locked();
+        xSemaphoreGive(s_tts_queue_lock);
+    }
 
     if (s_audio_state_lock != NULL && s_audio_free_slots != NULL && s_audio_pending_slots != NULL) {
         if (s_audio_slot_lock != NULL && xSemaphoreTake(s_audio_slot_lock, portMAX_DELAY) == pdTRUE) {
@@ -587,6 +763,11 @@ static bool ws_prepare_tts_playback(bool recovering_existing_stream) {
 static void ws_abort_tts_playback(void) {
     s_waiting_for_response = false;
 
+    if (s_tts_queue_lock != NULL && xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
+        ws_tts_queue_reset_locked();
+        xSemaphoreGive(s_tts_queue_lock);
+    }
+
     if (!s_tts_playing) {
         sfx_service_set_cloud_audio_busy(false);
         ws_resume_wake_word_after_tts();
@@ -599,6 +780,25 @@ static void ws_abort_tts_playback(void) {
     s_tts_playing = false;
     sfx_service_set_cloud_audio_busy(false);
     ws_resume_wake_word_after_tts();
+}
+
+static void ws_finish_tts_playback(void) {
+    s_waiting_for_response = false;
+
+    if (s_tts_playing) {
+        ESP_LOGI(TAG, "TTS playback complete");
+        vTaskDelay(pdMS_TO_TICKS(500));
+        hal_audio_stop();
+        hal_audio_set_playback_mode(false);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        hal_audio_set_sample_rate(16000);
+        behavior_state_set("happy");
+        s_tts_playing = false;
+    }
+
+    sfx_service_set_cloud_audio_busy(false);
+    ws_resume_wake_word_after_tts();
+    mem_monitor_snapshot("after_tts_playback");
 }
 
 static int ws_client_lock_and_send(bool binary, const void *payload, int len, bool allow_before_session) {
@@ -1689,46 +1889,105 @@ void ws_client_get_audio_queue_stats(ws_client_audio_queue_stats_t *stats) {
 }
 
 void ws_handle_tts_binary(const uint8_t *data, int len) {
-    int written;
+    int offset = 0;
 
     if (data == NULL || len <= 0) {
         return;
     }
 
-    if (!s_tts_playing || !hal_audio_is_running() || !hal_audio_is_playback_mode()) {
-        if (!ws_prepare_tts_playback(s_tts_playing)) {
+    if (ws_tts_runtime_init() != ESP_OK) {
+        int written;
+
+        if (!s_tts_playing || !hal_audio_is_running() || !hal_audio_is_playback_mode()) {
+            if (!ws_prepare_tts_playback(s_tts_playing)) {
+                return;
+            }
+        }
+
+        written = hal_audio_write(data, len);
+        if (written < 0 && (!hal_audio_is_running() || !hal_audio_is_playback_mode())) {
+            if (ws_prepare_tts_playback(true)) {
+                written = hal_audio_write(data, len);
+            }
+        }
+
+        if (written != len) {
+            ESP_LOGW(TAG, "TTS playback incomplete: %d/%d", written, len);
+        }
+        return;
+    }
+
+    while (offset < len) {
+        uint8_t slot_idx = 0;
+        int chunk_len = len - offset;
+        bool reclaimed_oldest = false;
+
+        if (chunk_len > WS_TTS_FRAME_BYTES) {
+            chunk_len = WS_TTS_FRAME_BYTES;
+        }
+
+        if (s_tts_queue_lock == NULL || xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(50)) != pdTRUE) {
             return;
         }
-    }
 
-    written = hal_audio_write(data, len);
-    if (written < 0 && (!hal_audio_is_running() || !hal_audio_is_playback_mode())) {
-        if (ws_prepare_tts_playback(true)) {
-            written = hal_audio_write(data, len);
+        if (uxQueueMessagesWaiting(s_tts_free_slots) == 0U) {
+            if (uxQueueMessagesWaiting(s_tts_pending_slots) > 0U &&
+                xQueueReceive(s_tts_pending_slots, &slot_idx, 0) == pdTRUE) {
+                reclaimed_oldest = true;
+                s_tts_dropped_frames++;
+            } else {
+                s_tts_dropped_frames++;
+                xSemaphoreGive(s_tts_queue_lock);
+                return;
+            }
+        } else if (xQueueReceive(s_tts_free_slots, &slot_idx, 0) != pdTRUE) {
+            s_tts_dropped_frames++;
+            xSemaphoreGive(s_tts_queue_lock);
+            return;
         }
-    }
 
-    if (written != len) {
-        ESP_LOGW(TAG, "TTS playback incomplete: %d/%d", written, len);
+        memcpy(s_tts_frame_pool[slot_idx].data, data + offset, (size_t)chunk_len);
+        s_tts_frame_pool[slot_idx].len = (uint16_t)chunk_len;
+        s_tts_frame_pool[slot_idx].enqueued_us = (uint64_t)esp_timer_get_time();
+
+        if (xQueueSendToBack(s_tts_pending_slots, &slot_idx, 0) != pdTRUE) {
+            (void)xQueueSendToBack(s_tts_free_slots, &slot_idx, 0);
+            s_tts_dropped_frames++;
+            xSemaphoreGive(s_tts_queue_lock);
+            return;
+        }
+
+        {
+            uint32_t pending = (uint32_t)uxQueueMessagesWaiting(s_tts_pending_slots);
+            if (pending > s_tts_high_watermark) {
+                s_tts_high_watermark = pending;
+            }
+        }
+
+        xSemaphoreGive(s_tts_queue_lock);
+
+        if (reclaimed_oldest && (s_tts_dropped_frames % 10U) == 1U) {
+            ESP_LOGW(TAG, "tts playback queue pressure: dropped=%lu high=%lu", (unsigned long)s_tts_dropped_frames,
+                     (unsigned long)s_tts_high_watermark);
+        }
+
+        offset += chunk_len;
     }
 }
 
 void ws_tts_complete(void) {
     s_waiting_for_response = false;
 
-    if (s_tts_playing) {
-        ESP_LOGI(TAG, "TTS playback complete");
-        vTaskDelay(pdMS_TO_TICKS(500));
-        hal_audio_stop();
-        hal_audio_set_playback_mode(false);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        hal_audio_set_sample_rate(16000);
-        behavior_state_set("happy");
-        s_tts_playing = false;
+    if (s_tts_queue_lock != NULL && xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
+        if (s_tts_pending_slots != NULL && uxQueueMessagesWaiting(s_tts_pending_slots) > 0U) {
+            s_tts_end_pending = true;
+            xSemaphoreGive(s_tts_queue_lock);
+            return;
+        }
+        xSemaphoreGive(s_tts_queue_lock);
     }
 
-    sfx_service_set_cloud_audio_busy(false);
-    ws_resume_wake_word_after_tts();
+    ws_finish_tts_playback();
 }
 
 void ws_tts_timeout_check(void) {

@@ -10,7 +10,7 @@ the firmware:
 - the HAL internally maps logical `90°` to the MS90 neutral pulse of `1500us`
 
 On startup, `hal_servo_init()` itself applies the default angles `X=90°` and
-`Y=90°`. Some behavior states later move Y to `120°`; that comes from the
+`Y=120°`. Some behavior states later move Y to other poses; that comes from the
 behavior resources, not from the HAL defaults.
 
 ## Overview
@@ -28,13 +28,15 @@ physical pulse model behind the existing firmware-facing logical angle model.
 - **Synchronized Motion**: Simultaneous dual-axis movement
 - **Mechanical Protection**: Y-axis limits prevent hardware damage
 - **Thread-Safe**: Mutex-protected angle access
+- **Motion Cancel**: Can discard queued motions and abort the current smooth
+  segment at the next interpolation step
 
 ## GPIO Mapping
 
 | Axis | GPIO | LEDC Channel | Logical Range |
 |------|------|--------------|---------------|
 | X (pan) | 19 | LEDC_TIMER_0, CH0 | 0-180°, neutral at 90° |
-| Y (tilt) | 20 | LEDC_TIMER_0, CH1 | 90-150° soft limit, neutral at 90° |
+| Y (tilt) | 20 | LEDC_TIMER_0, CH1 | 90-170° soft limit, neutral at 90° |
 
 ## API Reference
 
@@ -52,13 +54,13 @@ smooth-move background task. Must be called before any other servo functions.
 Immediately after `hal_servo_init()`, the current logical angles are:
 
 - `SERVO_AXIS_X`: `90°`
-- `SERVO_AXIS_Y`: `90°`
+- `SERVO_AXIS_Y`: `120°`
 
 Those values are also what the PWM outputs are configured to at boot, so
 `hal_servo_get_angle()` returns the expected current position right after
 initialization.
 
-After startup, the behavior layer may still command poses such as `Y=120°`
+After startup, the behavior layer may still command poses such as `Y=95°`
 through `states.json` or `spiffs/actions/*.json`. Those resources remain in the
 same logical angle space and are not rewritten by the HAL.
 
@@ -123,6 +125,18 @@ Get current logical servo angle.
 
 - Returns: Current logical angle in degrees, or -1 if not initialized
 
+### Cancel Queued Motion
+
+```c
+esp_err_t hal_servo_cancel_all(void);
+```
+
+Discard queued smooth-move commands and request the currently executing smooth
+segment to stop on its next interpolation step. This is intended for behavior
+state changes and external manual control handoff.
+
+- Returns: `ESP_OK` on success, `ESP_ERR_INVALID_STATE` if HAL not initialized
+
 ## Configuration (Kconfig)
 
 | Option | Default | Description |
@@ -130,7 +144,7 @@ Get current logical servo angle.
 | `WATCHER_SERVO_X_GPIO` | 19 | X-axis PWM output GPIO |
 | `WATCHER_SERVO_Y_GPIO` | 20 | Y-axis PWM output GPIO |
 | `WATCHER_SERVO_Y_MIN_DEG` | 90 | Y-axis mechanical minimum |
-| `WATCHER_SERVO_Y_MAX_DEG` | 150 | Y-axis mechanical maximum |
+| `WATCHER_SERVO_Y_MAX_DEG` | 170 | Y-axis mechanical maximum |
 | `WATCHER_SERVO_SMOOTH_STEP_MS` | 10 | Interpolation step interval |
 
 ## PWM Timing
@@ -157,7 +171,7 @@ Get current logical servo angle.
 
 void app_main(void)
 {
-    // Initialize servo HAL; startup defaults are X=90, Y=90
+    // Initialize servo HAL; startup defaults are X=90, Y=120
     ESP_ERROR_CHECK(hal_servo_init());
 
     // Smooth pan over 1 second
@@ -168,6 +182,9 @@ void app_main(void)
 
     // String-based command (for WebSocket handler)
     hal_servo_send_cmd("X", 135, 800);
+
+    // Abort queued smooth movement before manual handoff
+    hal_servo_cancel_all();
 
     // Query current position
     int x_angle = hal_servo_get_angle(SERVO_AXIS_X);
@@ -187,9 +204,9 @@ void app_main(void)
 
 ## Mechanical Limits
 
-The Y-axis has mechanical limits (default 90-150°) to prevent hardware damage.
-The HAL startup angle is 90°, and some behavior states later move the Y-axis to
-120° inside that same logical angle space. These limits are enforced
+The Y-axis has mechanical limits (default 90-170°) to prevent hardware damage.
+The HAL startup angle is 120°, and behavior states/actions later move the
+Y-axis inside that same logical angle space. These limits are enforced
 automatically:
 
 - `hal_servo_set_angle()`: Clamps Y-axis to limits
