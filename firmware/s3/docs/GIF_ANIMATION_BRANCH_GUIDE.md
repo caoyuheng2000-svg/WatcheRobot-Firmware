@@ -23,15 +23,15 @@ The branch has been brought to a hardware-validated baseline.
   `*.animpack` resolve correctly.
 - The current board-specific SDSPI path tolerates SD cards that reject
   `CMD59 CRC_ON_OFF` in SPI mode.
-- The current packaged release contains 10 generated animation types.
-- `custom1` and `custom2` are intentionally absent until source GIFs are added.
+- The current packaged release contains 12 generated animation types.
+- `custom1`, `custom2`, and `custom3` are included in the current generated asset set.
 
 ## Runtime Layout
 
 Authoring and generated assets live in these locations:
 
 - Source GIFs: `firmware/s3/assets/gif/`
-- Generated assets: `firmware/s3/release/v0.2.1/sdcard/anim/`
+- Generated assets: `firmware/s3/release/v0.2.6/sdcard/anim/`
 - Device runtime path: `/sdcard/anim/`
 
 The runtime expects at least:
@@ -65,7 +65,7 @@ The current branch has been validated against this baseline:
 - Generated assets can be mirrored to an SD-card root with
   `tools/sync_anim_sdcard.py`.
 - Release packaging now produces both a firmware flash bundle and an SD-card
-  animation bundle for `v0.2.1`.
+  animation bundle for `v0.2.6`.
 
 ## Daily Workflow
 

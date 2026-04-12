@@ -3,8 +3,8 @@
 This toolchain converts a folder of GIF animation sources into SD-card ready
 animation assets:
 
-- `release/v0.2.1/sdcard/anim/anim_manifest.bin`
-- `release/v0.2.1/sdcard/anim/<type>.animpack`
+- `release/v0.2.6/sdcard/anim/anim_manifest.bin`
+- `release/v0.2.6/sdcard/anim/<type>.animpack`
 
 ## Source Layout
 
@@ -36,7 +36,7 @@ transition period.
 From `firmware/s3`:
 
 ```powershell
-python tools/generate_anim_assets.py --input-dir assets/gif --output-dir release/v0.2.1/sdcard/anim --clean
+python tools/generate_anim_assets.py --input-dir assets/gif --output-dir release/v0.2.6/sdcard/anim --clean
 ```
 
 If you only want the default project paths, the command can be shortened to:
@@ -49,7 +49,7 @@ Useful options:
 
 ```powershell
 python tools/generate_anim_assets.py --fps 10 --clean
-python tools/generate_anim_assets.py --input-dir assets/gif --output-dir release/v0.2.1/sdcard/anim
+python tools/generate_anim_assets.py --input-dir assets/gif --output-dir release/v0.2.6/sdcard/anim
 python tools/generate_anim_assets.py --lv-color-16-swap
 ```
 
@@ -95,8 +95,8 @@ The SD-card root should end up with this layout:
 - The manifest stores pack path, dimensions, frame count, and timing metadata.
 - Animation types without a source GIF are skipped instead of generating empty
   placeholder outputs.
-- In the current `v0.2.1` source set, `custom1` and `custom2` are absent
-  and therefore do not appear in the generated manifest.
+- In the current `v0.2.6` source set, all 12 canonical animation types are
+  present and appear in the generated manifest.
 
 ## Runtime Expectations
 
@@ -106,14 +106,14 @@ The SD-card root should end up with this layout:
   present.
 - The current branch requires FATFS long file name support because
   `anim_manifest.bin` and `*.animpack` exceed 8.3 naming.
-- The current `v0.2.1` release bundle focuses on the runtime pipeline and the
-  currently shipped GIF asset set.
+- The current `v0.2.6` release bundle packages the current firmware baseline
+  together with the shipped GIF-derived asset set.
 
 ## Troubleshooting
 
 - `Anim manifest missing`
   - Confirm the SD card contains `anim/anim_manifest.bin` at the card root.
-  - Confirm the generated files were copied from `release/v0.2.1/sdcard/anim/`.
+  - Confirm the generated files were copied from `release/v0.2.6/sdcard/anim/`.
 - `No SD animation manifest available under /sdcard/anim`
   - Usually means the generated files were copied to the wrong directory or the
     wrong SD card was inserted.

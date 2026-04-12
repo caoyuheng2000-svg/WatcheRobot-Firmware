@@ -22,16 +22,14 @@ The current branch baseline is complete and validated for:
 
 ## Phase 2: Release Packaging Completed
 
-- Promote the GIF / AnimPack branch baseline into the `v0.2.1` release track.
+- Promote the GIF / AnimPack branch baseline into the maintained release track.
 - Package firmware flash binaries and SD-card animation assets as separate
-  deliverables under `release/v0.2.1/`.
-- Refresh top-level release documentation so `v0.2.1` is the current
+  deliverables under `release/v0.2.6/`.
+- Refresh top-level release documentation so `v0.2.6` is the current
   baseline for validation and distribution.
 
 ## Phase 3: Next
 
-- Add source GIFs for `custom1` and `custom2` so the release bundle covers the
-  full animation-type set again.
 - Refresh action data alongside the final animation pack so behavior playback
   matches the new GIF-authored state set.
 - Add a single branch-level asset configuration file so FPS, loop policy, and

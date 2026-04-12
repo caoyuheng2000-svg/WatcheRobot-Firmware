@@ -28,13 +28,13 @@ python tools/sync_anim_sdcard.py --target-root F:\
 
 Generated output is written to:
 
-- `release/v0.2.1/sdcard/anim/`
+- `release/v0.2.6/sdcard/anim/`
 
 Current release note:
 
-- The runtime pipeline is the target of this release.
-- The current packaged animation set includes 10 generated types.
-- `custom1` and `custom2` are not packaged until their source GIFs are added.
+- The runtime pipeline is already integrated into the current release flow.
+- The current packaged animation set includes 12 generated types.
+- `custom1`, `custom2`, and `custom3` are packaged in the current release.
 
 For the full branch guide and roadmap, see:
 
