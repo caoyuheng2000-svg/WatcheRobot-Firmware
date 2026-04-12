@@ -1,4 +1,5 @@
 #include "hal_audio.h"
+#include "sdkconfig.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -51,12 +52,11 @@ int hal_audio_init(void) {
     bsp_codec_set_fs(SAMPLE_RATE_RECORD, 16, 1);
     current_sample_rate = SAMPLE_RATE_RECORD;
 
-    /* Set volume and unmute (required for speaker output) */
-    /* NOTE: Volume 100 can cause clipping distortion, use 80 for cleaner output */
+    /* Set volume and unmute (required for speaker output). */
     bsp_codec_mute_set(false);
-    bsp_codec_volume_set(80, NULL);
+    bsp_codec_volume_set(CONFIG_WATCHER_AUDIO_VOLUME, NULL);
 
-    ESP_LOGI(TAG, "Audio codec initialized (16kHz for recording, volume=100)");
+    ESP_LOGI(TAG, "Audio codec initialized (16kHz for recording, volume=%d)", CONFIG_WATCHER_AUDIO_VOLUME);
     return 0;
 }
 

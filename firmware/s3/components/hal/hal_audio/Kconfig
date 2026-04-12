@@ -15,7 +15,7 @@ menu "Watcher HAL Audio"
 
     config WATCHER_AUDIO_VOLUME
         int "Default speaker volume (0-100)"
-        default 80
+        default 100
         range 0 100
         help
             Initial speaker volume. Values above 80 may cause clipping.
