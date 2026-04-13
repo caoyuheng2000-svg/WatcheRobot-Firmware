@@ -11,6 +11,47 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.2.6] - 2026-04-12
+
+### Added
+- Formal `v0.2.6` release packaging for the current mainline firmware bundle and the matching SD-card animation asset bundle
+
+### Fixed
+- Audio codec initialization now uses the configured default speaker volume instead of relying on an inconsistent hardcoded startup value
+
+### Changed
+- Firmware version is now tracked as `v0.2.6`
+- Default speaker playback volume is raised to `100` for the current Watcher audio HAL baseline
+- Release tooling defaults now target the `v0.2.6` output path for both firmware packaging and SD animation sync
+- Current formal release baseline moves forward from `v0.2.5` while keeping the refreshed SD animation bundle and custom asset set
+
+### Notes
+- Release focus: louder default speaker output, consistent audio initialization, and a rebuilt current-mainline package
+- The packaged SD animation set still contains 13 generated animation types including `custom1`, `custom2`, and `custom3`
+
+---
+
+## [0.2.5] - 2026-04-10
+
+### Added
+- Formal `v0.2.5` release packaging for the current mainline firmware and SD-card animation asset bundles
+- New `custom1` and `custom2` GIF source assets, included in the generated SD animation set
+
+### Fixed
+- Packaged SPIFFS action payloads are refreshed for the latest behavior-flow tuning
+- The `v0.2.5` SD-card animation ZIP and checksum manifest were regenerated once more to align with the final packaged asset contents
+
+### Changed
+- Firmware version is now tracked as `v0.2.5`
+- Current release tooling defaults now point at the `v0.2.5` output path
+- The SD-backed animation bundle now includes `custom1` and `custom2` in addition to the previously generated state set
+
+### Notes
+- Release focus: updated action content, refreshed SD animation assets, and expansion of the packaged custom animation set
+- The packaged SD animation set now contains 13 generated animation types: `boot`, `happy`, `error`, `bluetooth`, `speaking`, `listening`, `processing`, `standby`, `thinking`, `custom1`, `custom2`, and `custom3`
+
+---
+
 ## [0.2.4] - 2026-04-10
 
 ### Added
