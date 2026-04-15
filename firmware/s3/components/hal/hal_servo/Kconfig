@@ -1,5 +1,15 @@
 menu "Watcher HAL Servo"
 
+    config WATCHER_SERVO_USE_MCU_MOTION_BRIDGE
+        bool "Mirror smooth/sync/cancel calls to MCU motion service"
+        default n
+        help
+            Enables a compatibility bridge that translates smooth motion,
+            synchronized motion, and cancel requests into mcu_motion_service
+            requests. The local LEDC servo path remains active and is still
+            the safe default when this option is disabled or the bridge is
+            unavailable.
+
     config WATCHER_SERVO_X_GPIO
         int "Servo X axis GPIO number"
         default 19

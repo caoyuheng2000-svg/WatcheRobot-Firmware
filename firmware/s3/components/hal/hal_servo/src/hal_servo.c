@@ -18,12 +18,14 @@
 #include "hal_servo.h"
 #include "driver/ledc.h"
 #include "esp_log.h"
+#include "mcu_motion_service.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include <ctype.h>
+#include <stdint.h>
 #include <string.h>
 
 #define TAG "HAL_SERVO"
@@ -55,6 +57,9 @@
 #define SERVO_X_DEFAULT_DEG 90
 #define SERVO_Y_DEFAULT_DEG 120
 
+/* Optional compatibility bridge to the MCU motion service */
+#define SERVO_MOTION_BRIDGE_ENABLED CONFIG_WATCHER_SERVO_USE_MCU_MOTION_BRIDGE
+
 /** Synchronized dual-axis move command */
 typedef struct {
     int x_deg;
@@ -71,6 +76,11 @@ typedef struct {
 
 /** Combined command type for queue */
 typedef enum { CMD_TYPE_SINGLE, CMD_TYPE_SYNC } cmd_type_t;
+
+typedef struct {
+    bool enabled;
+    bool ready;
+} servo_motion_bridge_state_t;
 
 typedef struct {
     cmd_type_t type;
@@ -92,6 +102,7 @@ static portMUX_TYPE s_cmd_seq_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_cmd_seq = 0;
 static portMUX_TYPE s_motion_cancel_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_motion_cancel_generation = 0;
+static servo_motion_bridge_state_t s_motion_bridge = {.enabled = SERVO_MOTION_BRIDGE_ENABLED, .ready = false};
 
 /* Forward declarations */
 static void servo_task(void *arg);
@@ -113,6 +124,13 @@ static void servo_log_execute_start(const servo_cmd_msg_t *cmd);
 static void servo_log_execute_done(const servo_cmd_msg_t *cmd, uint32_t exec_ms);
 static uint32_t servo_cancel_generation(void);
 static bool servo_cancel_requested(uint32_t generation);
+static bool servo_bridge_is_ready(void);
+static void servo_bridge_init(void);
+static void servo_bridge_submit_single(servo_axis_t axis, int angle_deg, int duration_ms);
+static void servo_bridge_submit_sync(int x_deg, int y_deg, int duration_ms);
+static void servo_bridge_cancel_all(void);
+static esp_err_t servo_build_motion_request(uint8_t axis_mask, int x_deg, int y_deg, int duration_ms,
+                                            mcu_motion_request_t *out_request);
 
 /**
  * @brief Divide and round to the nearest integer.
@@ -405,6 +423,118 @@ static bool servo_cancel_requested(uint32_t generation) {
     return servo_cancel_generation() != generation;
 }
 
+static bool servo_bridge_is_ready(void) {
+    return s_motion_bridge.enabled && s_motion_bridge.ready;
+}
+
+static esp_err_t servo_build_motion_request(uint8_t axis_mask, int x_deg, int y_deg, int duration_ms,
+                                            mcu_motion_request_t *out_request) {
+    if (out_request == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (axis_mask == 0U || (axis_mask & ~(MCU_MOTION_AXIS_X | MCU_MOTION_AXIS_Y)) != 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (x_deg < 0 || x_deg > 180 || y_deg < 0 || y_deg > 180) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (duration_ms <= 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    out_request->axis_mask = axis_mask;
+    out_request->x_deg_x10 = (axis_mask & MCU_MOTION_AXIS_X) != 0U ? (int16_t)(x_deg * 10) : 0;
+    out_request->y_deg_x10 = (axis_mask & MCU_MOTION_AXIS_Y) != 0U ? (int16_t)(y_deg * 10) : 0;
+    out_request->duration_ms = duration_ms > UINT16_MAX ? UINT16_MAX : (uint16_t)duration_ms;
+    out_request->motion_profile = MCU_MOTION_PROFILE_LINEAR;
+    out_request->source = MCU_MOTION_SOURCE_UNKNOWN;
+
+    return ESP_OK;
+}
+
+static void servo_bridge_submit_single(servo_axis_t axis, int angle_deg, int duration_ms) {
+    if (!servo_bridge_is_ready()) {
+        return;
+    }
+
+    mcu_motion_request_t request;
+    esp_err_t ret = servo_build_motion_request(axis == SERVO_AXIS_X ? MCU_MOTION_AXIS_X : MCU_MOTION_AXIS_Y,
+                                               axis == SERVO_AXIS_X ? angle_deg : 0, axis == SERVO_AXIS_Y ? angle_deg : 0,
+                                               duration_ms, &request);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Bridge motion request rejected: axis=%s angle=%d duration_ms=%d error=%s",
+                 axis == SERVO_AXIS_X ? "X" : "Y", angle_deg, duration_ms, esp_err_to_name(ret));
+        return;
+    }
+
+    ret = mcu_motion_submit(&request);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Bridge smooth motion submit failed: axis=%s angle=%d duration_ms=%d error=%s",
+                 axis == SERVO_AXIS_X ? "X" : "Y", angle_deg, duration_ms, esp_err_to_name(ret));
+        return;
+    }
+
+    ESP_LOGI(TAG, "Mirrored smooth motion to MCU service: axis=%s angle=%d duration_ms=%d",
+             axis == SERVO_AXIS_X ? "X" : "Y", angle_deg, duration_ms);
+}
+
+static void servo_bridge_submit_sync(int x_deg, int y_deg, int duration_ms) {
+    if (!servo_bridge_is_ready()) {
+        return;
+    }
+
+    mcu_motion_request_t request;
+    esp_err_t ret = servo_build_motion_request(MCU_MOTION_AXIS_X | MCU_MOTION_AXIS_Y, x_deg, y_deg, duration_ms,
+                                               &request);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Bridge sync motion request rejected: x=%d y=%d duration_ms=%d error=%s", x_deg, y_deg,
+                 duration_ms, esp_err_to_name(ret));
+        return;
+    }
+
+    ret = mcu_motion_submit(&request);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Bridge sync motion submit failed: x=%d y=%d duration_ms=%d error=%s", x_deg, y_deg,
+                 duration_ms, esp_err_to_name(ret));
+        return;
+    }
+
+    ESP_LOGI(TAG, "Mirrored sync motion to MCU service: x=%d y=%d duration_ms=%d", x_deg, y_deg, duration_ms);
+}
+
+static void servo_bridge_cancel_all(void) {
+    if (!servo_bridge_is_ready()) {
+        return;
+    }
+
+    esp_err_t ret = mcu_motion_stop(MCU_MOTION_SOURCE_UNKNOWN);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Bridge motion cancel failed: error=%s", esp_err_to_name(ret));
+        return;
+    }
+
+    ESP_LOGI(TAG, "Mirrored motion cancel to MCU service");
+}
+
+static void servo_bridge_init(void) {
+    if (!s_motion_bridge.enabled) {
+        return;
+    }
+
+    esp_err_t ret = mcu_motion_service_init();
+    if (ret != ESP_OK) {
+        s_motion_bridge.ready = false;
+        ESP_LOGW(TAG, "MCU motion bridge unavailable; staying on local servo path: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    s_motion_bridge.ready = true;
+    ESP_LOGI(TAG, "MCU motion bridge enabled");
+}
+
 /**
  * @brief Background task for smooth servo movement.
  *
@@ -616,6 +746,7 @@ esp_err_t hal_servo_init(void) {
     }
 
     s_initialized = true;
+    servo_bridge_init();
     ESP_LOGI(TAG, "Servo HAL initialized: X=GPIO%d, Y=GPIO%d, startup=[%d,%d]deg, Y limits=[%d,%d]deg",
              CONFIG_WATCHER_SERVO_X_GPIO, CONFIG_WATCHER_SERVO_Y_GPIO, SERVO_X_DEFAULT_DEG, SERVO_Y_DEFAULT_DEG,
              CONFIG_WATCHER_SERVO_Y_MIN_DEG, CONFIG_WATCHER_SERVO_Y_MAX_DEG);
@@ -676,6 +807,8 @@ esp_err_t hal_servo_move_smooth(servo_axis_t axis, int angle_deg, int duration_m
         return hal_servo_set_angle(axis, angle_deg);
     }
 
+    servo_bridge_submit_single(axis, angle_deg, duration_ms);
+
     /* Enqueue smooth move command */
     servo_cmd_msg_t cmd = {.type = CMD_TYPE_SINGLE,
                            .seq_no = servo_next_seq(),
@@ -717,6 +850,8 @@ esp_err_t hal_servo_move_sync(int x_deg, int y_deg, int duration_ms) {
         esp_err_t ret_y = hal_servo_set_angle(SERVO_AXIS_Y, y_deg);
         return (ret_x != ESP_OK) ? ret_x : ret_y;
     }
+
+    servo_bridge_submit_sync(x_deg, y_deg, duration_ms);
 
     /* Enqueue synchronized move command */
     servo_cmd_msg_t cmd = {.type = CMD_TYPE_SYNC,
@@ -767,6 +902,8 @@ esp_err_t hal_servo_cancel_all(void) {
     if (!s_initialized || s_cmd_queue == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
+
+    servo_bridge_cancel_all();
 
     portENTER_CRITICAL(&s_motion_cancel_lock);
     s_motion_cancel_generation++;
