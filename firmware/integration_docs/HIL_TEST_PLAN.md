@@ -70,6 +70,9 @@ ESP32 <---- UART 921600 ----> STM32
 - `mag_state_rate_2hz`
 - `coproc_reset_recovery`
 - `snapshot_restore`
+  - 仅在 `capability_bitmap.bit5(snapshot) = 1` 时执行
+- `baseline_restore_without_snapshot`
+  - 仅在 `capability_bitmap.bit5(snapshot) = 0` 时执行
 
 ### 4.3 故障注入用例
 
@@ -125,4 +128,3 @@ HIL 日志输出中不得只写“失败”，必须带可定位字段。
 - BLE / WS 端到端云联调
 - STM32 固件升级联调
 - 视觉协处理器链路
-

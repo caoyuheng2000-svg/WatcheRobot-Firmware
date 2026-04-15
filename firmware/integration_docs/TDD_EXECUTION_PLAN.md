@@ -105,10 +105,11 @@ HIL 工具建议：
 先写失败测试：
 
 - `test_boot_transitions_to_handshaking`
-- `test_valid_hello_rsp_enters_ready`
+- `test_valid_hello_rsp_enters_link_ready`
+- `test_baseline_sync_completion_enters_ready`
 - `test_hello_timeout_retries`
 - `test_three_missed_heartbeats_enter_degraded`
-- `test_new_hello_rsp_recovers_ready`
+- `test_new_hello_rsp_recovers_link_ready`
 - `test_proto_version_mismatch_blocks_ready`
 - `test_ack_timeout_fails_command_without_resetting_link`
 
@@ -121,7 +122,7 @@ HIL 工具建议：
 
 出口标准：
 
-- 握手、心跳、超时、降级测试全绿
+- 握手、`link_ready -> ready`、心跳、超时、降级测试全绿
 - 仍不接真实 UART
 
 ### 4.3 阶段 3：动作与灯效服务层
@@ -265,4 +266,3 @@ HIL 工具建议：
 - STM32 固件升级 TDD
 - 上位机 GUI 自动化
 - 对外 WebSocket 协议回归脚本
-

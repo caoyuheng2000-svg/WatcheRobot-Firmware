@@ -538,11 +538,12 @@ ESP32 与 STM32 两侧都必须遵守以下背压策略：
 
 1. 重新发 `HELLO_REQ`
 2. 收到 `HELLO_RSP` 后校验版本与能力位
-3. 发 `SNAPSHOT_REQ`
-4. 用 `SNAPSHOT_RSP` 恢复当前动作/LED/传感器健康基线
-5. 再允许新业务命令
+3. 若 `capability_bitmap.bit5(snapshot) = 1`，发 `SNAPSHOT_REQ`
+4. 若支持 `snapshot`，用 `SNAPSHOT_RSP` 恢复当前动作/LED/传感器健康基线
+5. 若不支持 `snapshot`，ESP32 使用本地缓存的最后已知基线状态或默认安全基线重新同步 STM32
+6. 待快照恢复或本地基线恢复完成后，再允许新业务命令
 
-`SNAPSHOT_RSP` 至少应包含：
+`SNAPSHOT_RSP` 仅在 `capability_bitmap.bit5(snapshot) = 1` 时出现，且至少应包含：
 
 - 当前舵机位置
 - 当前 LED 模式
