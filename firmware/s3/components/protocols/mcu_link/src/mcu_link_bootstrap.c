@@ -49,38 +49,6 @@ static bool mcu_link_bootstrap_hello_retry_due(void)
     return (esp_timer_get_time() - s_last_hello_req_us) >= HELLO_RETRY_INTERVAL_US;
 }
 
-static void mcu_link_bootstrap_handle_event(const mcu_link_event_t *event)
-{
-    if (event == NULL) {
-        return;
-    }
-
-    switch (event->type) {
-        case MCU_LINK_RX_EVENT_HELLO_RSP:
-            if (!mcu_link_is_ready(&s_link) && mcu_link_is_link_ready(&s_link)) {
-                esp_err_t ret = mcu_link_mark_baseline_synced(&s_link);
-                if (ret == ESP_OK) {
-                    ESP_LOGI(TAG, "MCU link baseline sync completed using safe-default bootstrap policy");
-                } else {
-                    ESP_LOGW(TAG, "MCU link baseline sync failed: %s", esp_err_to_name(ret));
-                }
-            }
-            break;
-        case MCU_LINK_RX_EVENT_ACK:
-            ESP_LOGD(TAG, "MCU link received ACK");
-            break;
-        case MCU_LINK_RX_EVENT_NACK:
-            ESP_LOGW(TAG, "MCU link received NACK");
-            break;
-        case MCU_LINK_RX_EVENT_FAULT:
-            ESP_LOGW(TAG, "MCU link received FAULT");
-            break;
-        case MCU_LINK_RX_EVENT_NONE:
-        default:
-            break;
-    }
-}
-
 static esp_err_t mcu_link_bootstrap_init_uart(void)
 {
 #ifdef CONFIG_WATCHER_MCU_LINK_UART_ENABLE
@@ -159,7 +127,6 @@ esp_err_t mcu_link_bootstrap_poll(mcu_link_event_t *out_event)
     memset(out_event, 0, sizeof(*out_event));
 
     while (mcu_link_poll(&s_link, out_event) == ESP_OK) {
-        mcu_link_bootstrap_handle_event(out_event);
         if (out_event != &local_event) {
             return ESP_OK;
         }

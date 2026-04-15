@@ -6,7 +6,7 @@
 
 - 日期：`2026-04-15`
 - 集成分支：`v2.0.0-refactor`
-- 当前阶段：`ESP32 运行时链路已进入可持续收包状态，准备切入真实 STM32 串口 bring-up`
+- 当前阶段：`ESP32 运行时链路已具备 live frame -> service 分发，准备切入真实 STM32 串口 bring-up`
 - 当前板级串口：`COM28`
 
 ## 2. 已完成
@@ -46,6 +46,8 @@
   - 主循环已持续调用 `mcu_link_bootstrap_poll()`
   - `mcu_motion_service / mcu_led_service` 已改成仅在 `READY` 后放行业务帧
   - `hal_servo_init()` 失败已升级为启动期致命错误
+  - `mcu_link` 已能把 `ACK / NACK / FAULT / MOTION_DONE / LED_DONE / TOUCH_EVENT / MAG_STATE / IMU_STATE` 分发到 service
+  - `HELLO_RSP -> READY` 已从 bootstrap 隐式推进改成 app 层显式 safe-default baseline helper
 
 ### 2.3 ESP32 已落地内容
 
@@ -57,12 +59,15 @@
   - 已由主循环持续驱动 `mcu_link_bootstrap_poll()`，不再停留在“只在启动时发一次 `HELLO_REQ`”
   - 已可解 `HELLO_RSP / ACK / NACK / FAULT`
   - 已有最小 `HELLO_REQ` 重试与事件日志路径
+  - 已可产出 `SNAPSHOT_RSP / MOTION_DONE / LED_DONE / TOUCH_EVENT / MAG_STATE / IMU_STATE` 事件
 - `mcu_motion_service`
   - 已从“仅缓存请求”推进到“链路进入 `READY` 时镜像下发 `SERVO_MOVE / SERVO_STOP`”
   - `link` 缺失或未 ready 时已返回显式错误，不再“假成功”
+  - 已能消费 `ACK / NACK / FAULT / MOTION_DONE`
 - `mcu_led_service`
   - 已支持 `MCU_LED_MODE_STATIC / EFFECT / OFF` 构帧并通过 `mcu_link` 下发
   - `link` 未 ready 时已返回显式错误，不再把未发送请求当作 accepted
+  - 已能消费 `ACK / NACK / FAULT / LED_DONE`
 - `hal_servo`
   - 已收缩为协处理器兼容入口 / 参数校验层
   - 本地 PWM task / LEDC 运行路径已移除
@@ -72,6 +77,7 @@
   - 已建立 `touch / mag / imu` 缓存
   - 已增加 `mcu_sensor_service_apply_frame()` 作为上行 frame 消费入口
   - `IMU_STATE / MAG_STATE` 已采用 `latest-state-wins`
+  - 已能消费 `TOUCH_EVENT / MAG_STATE / IMU_STATE`
 - Mock HIL 工具
   - 已有 `tools/stm32_uart_hil.py`
   - 已有 `tools/stm32_uart_fault_inject.py`
@@ -105,9 +111,7 @@
 
 以下项目仍未进入“已实现”状态：
 
-- `mcu_link` 的 `ACK / NACK / FAULT / sensor state` 还没有分发到 motion / led / sensor 服务层
-- `MOTION_DONE / LED_DONE / TOUCH_EVENT / IMU_STATE / MAG_STATE` 的 live dispatch 还未接上
-- `HELLO_RSP -> READY` 当前仍依赖最小 safe-default bootstrap 策略，尚未替换成正式的 baseline restore 流程
+- `HELLO_RSP -> READY` 当前已改成 app 层显式 safe-default helper，但仍未替换成正式的 baseline restore 流程
 - `BLE / WS / control_ingress / behavior_state_service` 仍未完成全链路切换
 - 基于真实 STM32 的 UART 闭环联调尚未开始
 
@@ -120,14 +124,14 @@
 - 阶段 3：动作与灯效服务层，已完成 motion / led 的最小下行接入
 - 阶段 4：ESP32 适配层，已完成 `hal_servo -> mcu_motion_service` 的后端切换
 - 阶段 5：sensor 缓存层，已完成缓存与 `latest-state-wins` 基础能力
-- 阶段 6：live dispatch / service 消费，尚未开始
+- 阶段 6：live dispatch / service 消费，已完成最小闭环
 - 阶段 7：真实 STM32 闭环联调，尚未开始
 
 因此当前不应宣称“协处理器链路已完成”，更准确的说法是：
 
 - `ESP32` 侧已完成引脚切换和最小双向链路骨架
-- motion / led / sensor 已具备最小协议接入点，并完成 `READY` 语义收口
-- 还缺 live dispatch、正式 baseline restore、上层业务切换和 STM32 实机闭环
+- motion / led / sensor 已具备最小协议接入点，并完成 `READY` 语义收口与最小 live dispatch
+- 还缺正式 baseline restore、上层业务切换和 STM32 实机闭环
 
 ## 5. 距离真实 STM32 调试还差多少 ESP 侧工作
 
@@ -146,9 +150,9 @@
 如果目标是“开始有效的真实 STM32 业务联调”，ESP32 侧还缺 3 类硬前置工作：
 
 1. `mcu_link -> service` 的 live dispatch
-   - 否则真实 `ACK / NACK / FAULT / DONE / sensor frame` 仍停留在 link 层，业务层看不到
+   - 当前最小分发已落地，但还没有扩展到 `MAG_EVENT / IMU_EVENT / SENSOR_HEALTH` 等剩余消息
 2. 正式 baseline restore
-   - 当前 `HELLO_RSP -> READY` 还是最小 safe-default bootstrap，适合先跑通，不适合长期作为恢复真源
+   - 当前 `HELLO_RSP -> READY` 已改成 app 层显式 safe-default helper，适合先跑通，不适合长期作为恢复真源
 3. 串口联调时的 service 级观测闭环
    - 需要让 motion / led / sensor 层都能暴露“收到了什么、拒绝了什么、完成了什么”
 

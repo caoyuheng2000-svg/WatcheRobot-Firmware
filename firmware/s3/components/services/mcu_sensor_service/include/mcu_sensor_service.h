@@ -2,6 +2,7 @@
 #define MCU_SENSOR_SERVICE_H
 
 #include "esp_err.h"
+#include "mcu_link.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -70,6 +71,7 @@ esp_err_t mcu_sensor_service_apply_frame(const mcu_sensor_frame_t *frame);
 esp_err_t mcu_sensor_service_update_touch(const mcu_touch_state_t *state);
 esp_err_t mcu_sensor_service_update_mag(const mcu_mag_state_t *state);
 esp_err_t mcu_sensor_service_update_imu(const mcu_imu_state_t *state);
+esp_err_t mcu_sensor_service_handle_link_event(const mcu_link_event_t *event, bool *out_overwrote_latest_state);
 esp_err_t mcu_sensor_service_get_latest_touch(mcu_touch_state_t *out_state);
 esp_err_t mcu_sensor_service_get_latest_mag(mcu_mag_state_t *out_state);
 esp_err_t mcu_sensor_service_get_latest_imu(mcu_imu_state_t *out_state);

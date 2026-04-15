@@ -10,6 +10,23 @@ static const char *TAG = "MCU_MOTION";
 
 static mcu_motion_request_t s_last_request;
 static bool s_has_last_request;
+static uint32_t s_last_command_seq;
+static bool s_command_inflight;
+
+static uint16_t decode_u16_le(const uint8_t *src)
+{
+    return (uint16_t)(((uint16_t)src[0]) | ((uint16_t)src[1] << 8u));
+}
+
+static uint32_t decode_u32_le(const uint8_t *src)
+{
+    return ((uint32_t)src[0]) | ((uint32_t)src[1] << 8u) | ((uint32_t)src[2] << 16u) | ((uint32_t)src[3] << 24u);
+}
+
+static int16_t decode_i16_le(const uint8_t *src)
+{
+    return (int16_t)decode_u16_le(src);
+}
 
 static void encode_u16_le(uint8_t *dst, uint16_t value)
 {
@@ -60,12 +77,14 @@ static esp_err_t mcu_motion_submit_runtime_frame(const mcu_motion_request_t *req
 
     ESP_LOGI(TAG, "Queued SERVO_MOVE frame seq=%lu wire_len=%u axis_mask=0x%02x duration_ms=%u",
              (unsigned long)seq, (unsigned)wire_len, request->axis_mask, (unsigned)request->duration_ms);
+    s_last_command_seq = seq;
+    s_command_inflight = true;
     return ESP_OK;
 }
 
 static esp_err_t mcu_motion_submit_stop_frame(mcu_motion_source_t source)
 {
-    uint8_t payload[1];
+    uint8_t payload[2];
     mcu_link_t *link;
     uint32_t seq = 0u;
     size_t wire_len = 0u;
@@ -81,7 +100,8 @@ static esp_err_t mcu_motion_submit_stop_frame(mcu_motion_source_t source)
         return ESP_ERR_INVALID_STATE;
     }
 
-    payload[0] = (uint8_t)source;
+    payload[0] = 0u; /* current_motion */
+    payload[1] = (uint8_t)source;
     ret = mcu_link_send_frame(link, MCU_FRAME_CLASS_MOTION, MCU_MOTION_MSG_SERVO_STOP, MCU_FRAME_FLAG_ACK_REQ,
                               payload, (uint16_t)sizeof(payload), &seq, &wire_len);
     if (ret != ESP_OK) {
@@ -91,6 +111,8 @@ static esp_err_t mcu_motion_submit_stop_frame(mcu_motion_source_t source)
 
     ESP_LOGI(TAG, "Queued SERVO_STOP frame seq=%lu wire_len=%u source=%u", (unsigned long)seq, (unsigned)wire_len,
              (unsigned)source);
+    s_last_command_seq = seq;
+    s_command_inflight = true;
     return ESP_OK;
 }
 
@@ -127,6 +149,8 @@ esp_err_t mcu_motion_service_init(void)
 {
     memset(&s_last_request, 0, sizeof(s_last_request));
     s_has_last_request = false;
+    s_last_command_seq = 0u;
+    s_command_inflight = false;
     return ESP_OK;
 }
 
@@ -169,4 +193,53 @@ esp_err_t mcu_motion_stop(mcu_motion_source_t source)
     }
 
     return mcu_motion_submit_stop_frame(source);
+}
+
+esp_err_t mcu_motion_service_handle_link_event(const mcu_link_event_t *event)
+{
+    uint32_t ref_seq;
+
+    if (event == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    switch (event->type) {
+        case MCU_LINK_RX_EVENT_ACK:
+            ref_seq = decode_u32_le(event->frame.payload);
+            if (s_command_inflight && ref_seq == s_last_command_seq) {
+                ESP_LOGI(TAG, "Motion ACK ref_seq=%lu status=%u", (unsigned long)ref_seq,
+                         (unsigned)decode_u16_le(&event->frame.payload[4]));
+            }
+            return ESP_OK;
+        case MCU_LINK_RX_EVENT_NACK:
+            ref_seq = decode_u32_le(event->frame.payload);
+            if (s_command_inflight && ref_seq == s_last_command_seq) {
+                ESP_LOGW(TAG, "Motion NACK ref_seq=%lu reason=0x%04x", (unsigned long)ref_seq,
+                         (unsigned)decode_u16_le(&event->frame.payload[6]));
+                s_command_inflight = false;
+            }
+            return ESP_OK;
+        case MCU_LINK_RX_EVENT_FAULT:
+            ref_seq = decode_u32_le(event->frame.payload);
+            if (event->frame.payload[4] == 0x01u && (!s_command_inflight || ref_seq == s_last_command_seq || ref_seq == 0u)) {
+                ESP_LOGW(TAG, "Motion FAULT ref_seq=%lu fault_code=0x%04x detail=0x%04x", (unsigned long)ref_seq,
+                         (unsigned)decode_u16_le(&event->frame.payload[5]),
+                         (unsigned)decode_u16_le(&event->frame.payload[7]));
+                s_command_inflight = false;
+            }
+            return ESP_OK;
+        case MCU_LINK_RX_EVENT_MOTION_DONE:
+            ref_seq = decode_u32_le(event->frame.payload);
+            if (!s_command_inflight || ref_seq == s_last_command_seq) {
+                ESP_LOGI(TAG,
+                         "Motion DONE ref_seq=%lu result=%u final=(%d,%d) exec_ms=%u",
+                         (unsigned long)ref_seq, (unsigned)event->frame.payload[4],
+                         (int)decode_i16_le(&event->frame.payload[5]), (int)decode_i16_le(&event->frame.payload[7]),
+                         (unsigned)decode_u16_le(&event->frame.payload[9]));
+                s_command_inflight = false;
+            }
+            return ESP_OK;
+        default:
+            return ESP_ERR_NOT_FOUND;
+    }
 }

@@ -3,6 +3,11 @@
 
 #include <string.h>
 
+static uint32_t decode_u32_le(const uint8_t *src)
+{
+    return ((uint32_t)src[0]) | ((uint32_t)src[1] << 8u) | ((uint32_t)src[2] << 16u) | ((uint32_t)src[3] << 24u);
+}
+
 static uint32_t mcu_link_alloc_tx_seq(mcu_link_t *link)
 {
     uint32_t seq = link->next_tx_seq;
@@ -65,7 +70,10 @@ static esp_err_t mcu_link_handle_frame(mcu_link_t *link, const mcu_frame_t *fram
                     }
 
                     snapshot_supported = mcu_link_parse_hello_rsp_snapshot_supported(frame, &default_stream_profile);
-                    (void)default_stream_profile;
+                    if (default_stream_profile != 0x01u) {
+                        (void)mcu_link_mark_degraded(link);
+                        return ESP_ERR_NOT_SUPPORTED;
+                    }
 
                     if (previous_state == MCU_LINK_STATE_RECOVERING || previous_state == MCU_LINK_STATE_DEGRADED) {
                         mcu_link_record_reconnect(link);
@@ -80,12 +88,23 @@ static esp_err_t mcu_link_handle_frame(mcu_link_t *link, const mcu_frame_t *fram
                     }
                     return ESP_OK;
                 }
+                case MCU_SYS_MSG_SNAPSHOT_RSP:
+                    if (out_event != NULL) {
+                        out_event->type = MCU_LINK_RX_EVENT_SNAPSHOT_RSP;
+                    }
+                    return ESP_OK;
                 case MCU_SYS_MSG_ACK:
+                    if (frame->header.payload_len < 6u) {
+                        return ESP_ERR_NOT_FOUND;
+                    }
                     if (out_event != NULL) {
                         out_event->type = MCU_LINK_RX_EVENT_ACK;
                     }
                     return ESP_OK;
                 case MCU_SYS_MSG_NACK:
+                    if (frame->header.payload_len < 8u) {
+                        return ESP_ERR_NOT_FOUND;
+                    }
                     if (mcu_link_get_state(link) == MCU_LINK_STATE_HANDSHAKING ||
                         mcu_link_get_state(link) == MCU_LINK_STATE_RECOVERING) {
                         (void)mcu_link_mark_degraded(link);
@@ -96,14 +115,16 @@ static esp_err_t mcu_link_handle_frame(mcu_link_t *link, const mcu_frame_t *fram
                     return ESP_OK;
                 case MCU_SYS_MSG_FAULT: {
                     uint8_t fault_source = 0u;
+                    uint32_t ref_seq = 0u;
 
-                    if (frame->header.payload_len < 11u) {
+                    if (frame->header.payload_len < 9u) {
                         return ESP_ERR_NOT_FOUND;
                     }
 
+                    ref_seq = decode_u32_le(frame->payload);
                     fault_source = frame->payload[4];
 
-                    if (fault_source == 0x01u) {
+                    if (fault_source == 0x01u || ref_seq != 0u) {
                         mcu_link_record_motion_done_fault(link);
                     }
 
@@ -116,6 +137,58 @@ static esp_err_t mcu_link_handle_frame(mcu_link_t *link, const mcu_frame_t *fram
                     }
                     return ESP_OK;
                 }
+                default:
+                    break;
+            }
+            break;
+        case MCU_FRAME_CLASS_MOTION:
+            if ((mcu_motion_msg_id_t)frame->header.msg_id == MCU_MOTION_MSG_MOTION_DONE) {
+                if (frame->header.payload_len < 11u) {
+                    return ESP_ERR_NOT_FOUND;
+                }
+                if (out_event != NULL) {
+                    out_event->type = MCU_LINK_RX_EVENT_MOTION_DONE;
+                }
+                return ESP_OK;
+            }
+            break;
+        case MCU_FRAME_CLASS_LED:
+            if ((mcu_led_msg_id_t)frame->header.msg_id == MCU_LED_MSG_DONE) {
+                if (frame->header.payload_len < 5u) {
+                    return ESP_ERR_NOT_FOUND;
+                }
+                if (out_event != NULL) {
+                    out_event->type = MCU_LINK_RX_EVENT_LED_DONE;
+                }
+                return ESP_OK;
+            }
+            break;
+        case MCU_FRAME_CLASS_SENSOR:
+            switch ((mcu_sensor_msg_id_t)frame->header.msg_id) {
+                case MCU_SENSOR_MSG_TOUCH_EVENT:
+                    if (frame->header.payload_len < 6u) {
+                        return ESP_ERR_NOT_FOUND;
+                    }
+                    if (out_event != NULL) {
+                        out_event->type = MCU_LINK_RX_EVENT_TOUCH_EVENT;
+                    }
+                    return ESP_OK;
+                case MCU_SENSOR_MSG_MAG_STATE:
+                    if (frame->header.payload_len < 6u) {
+                        return ESP_ERR_NOT_FOUND;
+                    }
+                    if (out_event != NULL) {
+                        out_event->type = MCU_LINK_RX_EVENT_MAG_STATE;
+                    }
+                    return ESP_OK;
+                case MCU_SENSOR_MSG_IMU_STATE:
+                    if (frame->header.payload_len < 11u) {
+                        return ESP_ERR_NOT_FOUND;
+                    }
+                    if (out_event != NULL) {
+                        out_event->type = MCU_LINK_RX_EVENT_IMU_STATE;
+                    }
+                    return ESP_OK;
                 default:
                     break;
             }
@@ -212,6 +285,11 @@ bool mcu_link_is_link_ready(const mcu_link_t *link)
 bool mcu_link_is_ready(const mcu_link_t *link)
 {
     return link != NULL && mcu_link_fsm_is_ready(&link->fsm);
+}
+
+bool mcu_link_snapshot_supported(const mcu_link_t *link)
+{
+    return link != NULL && link->fsm.snapshot_supported;
 }
 
 const mcu_link_stats_t *mcu_link_get_stats(const mcu_link_t *link)

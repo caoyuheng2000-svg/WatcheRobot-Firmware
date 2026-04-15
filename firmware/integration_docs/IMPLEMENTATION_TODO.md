@@ -14,7 +14,7 @@
 
 ## 2. 下一阶段总目标
 
-把当前“ESP32 已切到 STM32 UART 后端，但 live dispatch 和业务层切换尚未完成”的状态，推进到“ESP32 具备完整运行时事件分发与上层接入能力”的下一检查点。
+把当前“ESP32 已切到 STM32 UART 后端，并具备最小 live dispatch，但正式恢复与上层业务切换尚未完成”的状态，推进到“ESP32 可进入真实 STM32 闭环联调”的下一检查点。
 
 ## 3. 已冻结的待办
 
@@ -30,28 +30,8 @@
 - `mcu_link_poll()` 已接入主循环持续调度
 - motion / led 已改成仅在 `READY` 后放行业务帧
 - `hal_servo_init()` 失败已升级为启动期 halt
-
-### TODO-006：把 `mcu_link` live frame 分发给业务服务
-
-目标：
-
-- 让 `mcu_link` 收到的运行时消息真正驱动 `mcu_motion_service / mcu_led_service / mcu_sensor_service`
-- 不再停留在“只更新 FSM 和 stats”的层面
-
-边界：
-
-- 接入 `MOTION_DONE`
-- 接入 `LED_DONE`
-- 接入 `TOUCH_EVENT`
-- 接入 `IMU_STATE`
-- 接入 `MAG_STATE`
-- `ACK / NACK / FAULT` 至少能进入 service 可消费接口
-
-最低验收：
-
-- mock 场景下，live frame 能进入对应 service
-- service 层状态不再只依赖本地缓存 API 手动更新
-- `motion_done_fault_count / dropped_state_count` 能在运行时闭环更新
+- `mcu_link` live frame 已接入 motion / led / sensor service 的最小消费闭环
+- `ACK / NACK / FAULT / MOTION_DONE / LED_DONE / TOUCH_EVENT / MAG_STATE / IMU_STATE` 已可进入对应 service
 
 ### TODO-007：把最小 safe-default bootstrap 替换成正式 baseline restore
 
@@ -133,15 +113,13 @@
 
 下一阶段执行顺序冻结为：
 
-1. `mcu_link` live frame -> service 分发
-2. 正式 baseline restore
-3. 串口 bring-up 期间的 service 级观测和 bench checklist
-4. 上层业务入口切换到协处理器语义
-5. 真实 STM32 UART 闭环联调
+1. 正式 baseline restore
+2. 串口 bring-up 期间的 service 级观测和 bench checklist
+3. 上层业务入口切换到协处理器语义
+4. 真实 STM32 UART 闭环联调
 
 不建议跳步直接做 BLE / WS 回归，因为当前最关键的缺口仍是：
 
-- live frame 还没进入业务层
 - 正式 baseline restore 还没替换当前最小兜底策略
 - mock 闭环还没切到真实 STM32
 

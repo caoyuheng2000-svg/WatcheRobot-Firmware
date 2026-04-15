@@ -1,6 +1,10 @@
 #include "mcu_sensor_service.h"
 
+#include "esp_log.h"
+
 #include <string.h>
+
+static const char *TAG = "MCU_SENSOR";
 
 typedef struct {
     bool touch_valid;
@@ -13,6 +17,21 @@ typedef struct {
 } mcu_sensor_cache_t;
 
 static mcu_sensor_cache_t s_cache;
+
+static uint16_t decode_u16_le(const uint8_t *src)
+{
+    return (uint16_t)(((uint16_t)src[0]) | ((uint16_t)src[1] << 8u));
+}
+
+static uint32_t decode_u32_le(const uint8_t *src)
+{
+    return ((uint32_t)src[0]) | ((uint32_t)src[1] << 8u) | ((uint32_t)src[2] << 16u) | ((uint32_t)src[3] << 24u);
+}
+
+static int16_t decode_i16_le(const uint8_t *src)
+{
+    return (int16_t)decode_u16_le(src);
+}
 
 esp_err_t mcu_sensor_service_init(void)
 {
@@ -176,4 +195,78 @@ esp_err_t mcu_sensor_service_get_stats(mcu_sensor_service_stats_t *out_stats)
 
     *out_stats = s_cache.stats;
     return ESP_OK;
+}
+
+esp_err_t mcu_sensor_service_handle_link_event(const mcu_link_event_t *event, bool *out_overwrote_latest_state)
+{
+    esp_err_t ret;
+
+    if (out_overwrote_latest_state != NULL) {
+        *out_overwrote_latest_state = false;
+    }
+
+    if (event == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    switch (event->type) {
+        case MCU_LINK_RX_EVENT_TOUCH_EVENT: {
+            mcu_touch_state_t state = {
+                .active = event->frame.payload[1] != 2u,
+                .timestamp_ms = decode_u32_le(&event->frame.payload[2]),
+            };
+
+            if (out_overwrote_latest_state != NULL && s_cache.touch_valid) {
+                *out_overwrote_latest_state = true;
+            }
+            ret = mcu_sensor_service_apply_touch_impl(&state);
+            if (ret == ESP_OK) {
+                ESP_LOGI(TAG, "Touch EVENT id=%u code=%u ts=%lu active=%d", (unsigned)event->frame.payload[0],
+                         (unsigned)event->frame.payload[1], (unsigned long)state.timestamp_ms, state.active ? 1 : 0);
+            }
+            return ret;
+        }
+        case MCU_LINK_RX_EVENT_MAG_STATE: {
+            mcu_mag_state_t state = {
+                .heading_deg_x100 = decode_u16_le(&event->frame.payload[0]),
+                .field_norm_uT = decode_u16_le(&event->frame.payload[2]),
+                .quality = event->frame.payload[4],
+                .status_bits = event->frame.payload[5],
+                .timestamp_ms = 0u,
+            };
+
+            if (out_overwrote_latest_state != NULL && s_cache.mag_valid) {
+                *out_overwrote_latest_state = true;
+            }
+            ret = mcu_sensor_service_apply_mag_impl(&state);
+            if (ret == ESP_OK) {
+                ESP_LOGD(TAG, "MAG STATE heading=%u field=%u quality=%u status=0x%02x", (unsigned)state.heading_deg_x100,
+                         (unsigned)state.field_norm_uT, (unsigned)state.quality, (unsigned)state.status_bits);
+            }
+            return ret;
+        }
+        case MCU_LINK_RX_EVENT_IMU_STATE: {
+            mcu_imu_state_t state = {
+                .roll_deg_x100 = decode_i16_le(&event->frame.payload[0]),
+                .pitch_deg_x100 = decode_i16_le(&event->frame.payload[2]),
+                .yaw_deg_x100 = decode_i16_le(&event->frame.payload[4]),
+                .acc_norm_mg = decode_u16_le(&event->frame.payload[6]),
+                .gyro_norm_dps_x10 = decode_u16_le(&event->frame.payload[8]),
+                .motion_flags = event->frame.payload[10],
+                .timestamp_ms = 0u,
+            };
+
+            if (out_overwrote_latest_state != NULL && s_cache.imu_valid) {
+                *out_overwrote_latest_state = true;
+            }
+            ret = mcu_sensor_service_apply_imu_impl(&state);
+            if (ret == ESP_OK) {
+                ESP_LOGD(TAG, "IMU STATE roll=%d pitch=%d yaw=%d flags=0x%02x", (int)state.roll_deg_x100,
+                         (int)state.pitch_deg_x100, (int)state.yaw_deg_x100, (unsigned)state.motion_flags);
+            }
+            return ret;
+        }
+        default:
+            return ESP_ERR_NOT_FOUND;
+    }
 }

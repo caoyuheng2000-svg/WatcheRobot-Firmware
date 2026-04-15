@@ -23,8 +23,11 @@
 #include "hal_display.h"
 #include "hal_servo.h"
 #include "mem_monitor.h"
+#include "mcu_led_service.h"
 #include "ota_service.h"
 #include "mcu_link_bootstrap.h"
+#include "mcu_motion_service.h"
+#include "mcu_sensor_service.h"
 #include "sensecap-watcher.h"
 #include "voice_service.h"
 #include "wifi_manager.h"
@@ -533,6 +536,73 @@ static void init_mcu_link_bootstrap(void) {
              mcu_link_bootstrap_is_ready() ? 1 : 0);
 }
 
+static void init_mcu_runtime_services(void) {
+    esp_err_t ret;
+
+    ret = mcu_led_service_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "MCU LED service init failed: %s", esp_err_to_name(ret));
+        boot_halt_with_error("MCU LED init failed");
+    }
+
+    ret = mcu_sensor_service_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "MCU sensor service init failed: %s", esp_err_to_name(ret));
+        boot_halt_with_error("MCU sensor init failed");
+    }
+}
+
+static void maybe_complete_mcu_link_baseline_restore(const mcu_link_event_t *event) {
+    mcu_link_t *link;
+    esp_err_t ret;
+
+    if (event == NULL || event->type != MCU_LINK_RX_EVENT_HELLO_RSP) {
+        return;
+    }
+
+    link = mcu_link_bootstrap_get_link();
+    if (link == NULL || !mcu_link_is_link_ready(link) || mcu_link_is_ready(link)) {
+        return;
+    }
+
+    if (mcu_link_snapshot_supported(link)) {
+        ESP_LOGW(TAG, "MCU link snapshot restore is not implemented yet; using explicit safe-default baseline");
+    } else {
+        ESP_LOGI(TAG, "MCU link restoring explicit safe-default baseline (no snapshot support)");
+    }
+
+    ret = mcu_link_mark_baseline_synced(link);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "MCU link baseline restore failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    ESP_LOGI(TAG, "MCU link baseline restore completed (state=%d ready=%d)", (int)mcu_link_get_state(link),
+             mcu_link_is_ready(link) ? 1 : 0);
+}
+
+static void dispatch_mcu_link_runtime_event(const mcu_link_event_t *event) {
+    mcu_link_t *link;
+    bool overwrote_latest = false;
+
+    if (event == NULL || event->type == MCU_LINK_RX_EVENT_NONE) {
+        return;
+    }
+
+    maybe_complete_mcu_link_baseline_restore(event);
+    (void)mcu_motion_service_handle_link_event(event);
+    (void)mcu_led_service_handle_link_event(event);
+    (void)mcu_sensor_service_handle_link_event(event, &overwrote_latest);
+
+    if (overwrote_latest &&
+        (event->type == MCU_LINK_RX_EVENT_IMU_STATE || event->type == MCU_LINK_RX_EVENT_MAG_STATE)) {
+        link = mcu_link_bootstrap_get_link();
+        if (link != NULL) {
+            (void)mcu_link_record_dropped_state(link);
+        }
+    }
+}
+
 static void service_mcu_link_runtime(void) {
     int processed = 0;
 
@@ -541,6 +611,7 @@ static void service_mcu_link_runtime(void) {
         esp_err_t ret = mcu_link_bootstrap_poll(&event);
 
         if (ret == ESP_OK) {
+            dispatch_mcu_link_runtime_event(&event);
             processed++;
             continue;
         }
@@ -1362,6 +1433,7 @@ void app_main(void) {
     boot_anim_set_progress(25);
     boot_anim_set_text("MCU Link...");
     init_mcu_link_bootstrap();
+    init_mcu_runtime_services();
 
     /* 4.5 Servo compatibility facade (no local PWM backend). */
     boot_anim_set_text("Servo...");

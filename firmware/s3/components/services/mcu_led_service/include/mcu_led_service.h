@@ -2,6 +2,7 @@
 #define MCU_LED_SERVICE_H
 
 #include "esp_err.h"
+#include "mcu_link.h"
 
 #include <stdint.h>
 
@@ -39,6 +40,7 @@ typedef struct {
 esp_err_t mcu_led_service_init(void);
 esp_err_t mcu_led_submit(const mcu_led_request_t *request);
 esp_err_t mcu_led_service_get_last_request(mcu_led_request_t *out_request);
+esp_err_t mcu_led_service_handle_link_event(const mcu_link_event_t *event);
 
 #ifdef __cplusplus
 }

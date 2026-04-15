@@ -19,12 +19,19 @@
 
 ## 2. 进入真实 STM32 调试前的 ESP32 必做项
 
+### 已完成
+
+- [x] `FR-001` 的最小 code path 已落地：`ACK / NACK / FAULT / MOTION_DONE / LED_DONE / TOUCH_EVENT / MAG_STATE / IMU_STATE` 已能进入对应 service
+- [x] `HELLO_RSP -> READY` 已从 bootstrap 隐式推进改成 app 层显式 helper
+
+### 未完成
+
 ### FR-001：`mcu_link` live frame 必须进入 service 层
 
-- [ ] `ACK / NACK / FAULT` 能被 motion / led / sensor 侧消费
-- [ ] `MOTION_DONE` 能进入 motion service
-- [ ] `LED_DONE` 能进入 led service
-- [ ] `TOUCH_EVENT / IMU_STATE / MAG_STATE` 能进入 sensor service
+- [x] `ACK / NACK / FAULT` 能被 motion / led / sensor 侧消费
+- [x] `MOTION_DONE` 能进入 motion service
+- [x] `LED_DONE` 能进入 led service
+- [x] `TOUCH_EVENT / IMU_STATE / MAG_STATE` 能进入 sensor service
 
 退出条件：
 
@@ -32,13 +39,13 @@
 
 ### FR-002：`READY` 必须来自正式 baseline restore
 
-- [ ] 去掉当前 `HELLO_RSP -> mark_baseline_synced()` 的最小兜底路径
+- [x] 去掉当前 `HELLO_RSP -> mark_baseline_synced()` 的 bootstrap 隐式兜底路径
 - [ ] 冷启动时明确 `snapshot` / `safe-default` 的基线来源
 - [ ] 恢复时明确 `snapshot` / `safe-default` 的基线来源
 
 退出条件：
 
-- 文档定义和代码行为一致，`READY` 不再依赖隐式推进
+- 文档定义和代码行为一致，`READY` 不再依赖临时 helper 推进
 
 ### FR-003：串口 bring-up 期间必须有 service 级可观测性
 

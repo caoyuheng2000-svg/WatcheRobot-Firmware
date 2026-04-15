@@ -30,9 +30,15 @@ typedef struct {
 typedef enum {
     MCU_LINK_RX_EVENT_NONE = 0,
     MCU_LINK_RX_EVENT_HELLO_RSP,
+    MCU_LINK_RX_EVENT_SNAPSHOT_RSP,
     MCU_LINK_RX_EVENT_ACK,
     MCU_LINK_RX_EVENT_NACK,
     MCU_LINK_RX_EVENT_FAULT,
+    MCU_LINK_RX_EVENT_MOTION_DONE,
+    MCU_LINK_RX_EVENT_LED_DONE,
+    MCU_LINK_RX_EVENT_TOUCH_EVENT,
+    MCU_LINK_RX_EVENT_MAG_STATE,
+    MCU_LINK_RX_EVENT_IMU_STATE,
 } mcu_link_rx_event_type_t;
 
 typedef struct {
@@ -50,6 +56,7 @@ esp_err_t mcu_link_begin_recovery(mcu_link_t *link);
 mcu_link_state_t mcu_link_get_state(const mcu_link_t *link);
 bool mcu_link_is_link_ready(const mcu_link_t *link);
 bool mcu_link_is_ready(const mcu_link_t *link);
+bool mcu_link_snapshot_supported(const mcu_link_t *link);
 const mcu_link_stats_t *mcu_link_get_stats(const mcu_link_t *link);
 esp_err_t mcu_link_copy_stats(const mcu_link_t *link, mcu_link_stats_t *out_stats);
 esp_err_t mcu_link_record_ack_timeout(mcu_link_t *link);
