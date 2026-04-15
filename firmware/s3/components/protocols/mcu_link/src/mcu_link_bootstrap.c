@@ -68,6 +68,15 @@ bool mcu_link_bootstrap_is_ready(void)
     return s_link_initialized && mcu_link_is_ready(&s_link);
 }
 
+esp_err_t mcu_link_bootstrap_poll(mcu_link_event_t *out_event)
+{
+    if (!s_link_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    return mcu_link_poll(&s_link, out_event);
+}
+
 esp_err_t mcu_link_bootstrap_start(void)
 {
     uint32_t seq = 0u;

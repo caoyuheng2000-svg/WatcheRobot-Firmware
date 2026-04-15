@@ -21,7 +21,24 @@ typedef struct {
     mcu_link_fsm_t fsm;
     mcu_link_stats_t stats;
     uint32_t next_tx_seq;
+    struct {
+        uint8_t stream[MCU_FRAME_MAX_WIRE_SIZE];
+        size_t stream_len;
+    } rx;
 } mcu_link_t;
+
+typedef enum {
+    MCU_LINK_RX_EVENT_NONE = 0,
+    MCU_LINK_RX_EVENT_HELLO_RSP,
+    MCU_LINK_RX_EVENT_ACK,
+    MCU_LINK_RX_EVENT_NACK,
+    MCU_LINK_RX_EVENT_FAULT,
+} mcu_link_rx_event_type_t;
+
+typedef struct {
+    mcu_link_rx_event_type_t type;
+    mcu_frame_t frame;
+} mcu_link_event_t;
 
 esp_err_t mcu_link_init(mcu_link_t *link);
 esp_err_t mcu_link_reset(mcu_link_t *link);
@@ -49,6 +66,7 @@ esp_err_t mcu_link_send_frame(mcu_link_t *link,
                               uint32_t *out_seq,
                               size_t *out_wire_len);
 esp_err_t mcu_link_send_hello_req(mcu_link_t *link, uint32_t *out_seq, size_t *out_wire_len);
+esp_err_t mcu_link_poll(mcu_link_t *link, mcu_link_event_t *out_event);
 
 #ifdef __cplusplus
 }
