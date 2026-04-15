@@ -9,6 +9,7 @@
  *   - 50Hz, 14-bit LEDC PWM
  *   - Smooth movement with linear interpolation
  *   - Synchronized dual-axis motion
+ *   - Optional compatibility bridge to mcu_motion_service
  *   - Y-axis mechanical limit protection
  */
 
@@ -28,7 +29,9 @@ typedef enum {
  * @brief Initialize servo HAL with LEDC PWM output.
  *
  * Configures GPIO 19 (X axis) and GPIO 20 (Y axis) as LEDC PWM channels
- * and starts the smooth-move background task.
+ * and starts the smooth-move background task. If the optional MCU motion
+ * bridge is enabled, it is initialized as a mirror/backend compatibility
+ * path, but the local LEDC path remains the safe default.
  *
  * Logical angle model:
  *   - Public APIs use installation-space logical angles in the 0-180 range
@@ -65,6 +68,8 @@ esp_err_t hal_servo_set_angle(servo_axis_t axis, int angle_deg);
  *
  * Enqueues a smooth move command. The background task interpolates
  * from current position to target over duration_ms milliseconds.
+ * When the optional MCU motion bridge is enabled, the request is also
+ * translated and mirrored to mcu_motion_service.
  *
  * @param axis        Servo axis (X or Y)
  * @param angle_deg   Target logical angle (0–180, neutral at 90)
@@ -75,6 +80,9 @@ esp_err_t hal_servo_move_smooth(servo_axis_t axis, int angle_deg, int duration_m
 
 /**
  * @brief Move both axes simultaneously.
+ *
+ * When the optional MCU motion bridge is enabled, the request is also
+ * translated and mirrored to mcu_motion_service.
  *
  * @param x_deg       Target logical X angle (0–180, neutral at 90)
  * @param y_deg       Target logical Y angle (0–180, neutral at 90)
@@ -101,8 +109,10 @@ esp_err_t hal_servo_send_cmd(const char *id, int angle_deg, int duration_ms);
  *
  * Clears the pending motion queue and asks the background interpolation task
  * to stop the currently executing smooth segment on its next interpolation
- * step boundary. This is used by higher-level behavior/state switching so a
- * new action does not have to wait for the previous loop's queued motions.
+ * step boundary. If the optional MCU motion bridge is enabled, the stop is
+ * mirrored to mcu_motion_service as well. This is used by higher-level
+ * behavior/state switching so a new action does not have to wait for the
+ * previous loop's queued motions.
  *
  * @return ESP_OK on success, ESP_ERR_INVALID_STATE if servo HAL is not ready
  */
