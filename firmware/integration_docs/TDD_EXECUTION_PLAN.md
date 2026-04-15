@@ -54,6 +54,33 @@
 - ESP32 + STM32 实板闭环
 - 恢复、故障注入、速率压力测试
 
+### 2.5 无 STM32 实机阶段的 Mock 策略
+
+在没有 STM32 实机前，测试策略冻结为：
+
+- 不直接依赖物理 UART
+- 先验证协议、状态机、服务层和背压策略
+- 真 UART 驱动与实板只在 `L3` 与 `L4` 再接入
+
+Mock 分层冻结为：
+
+- `M0 message-level mock`
+  - 直接注入已解码消息对象
+  - 用于验证状态机迁移、ACK/NACK/DONE/FAULT 处理和 service 逻辑
+- `M1 byte-stream mock`
+  - 注入 `COBS + CRC16 + 0x00 delimiter` 后的原始字节流
+  - 用于验证解帧、重同步、坏帧恢复和粘包/拆包逻辑
+- `M2 uart-driver mock`
+  - 模拟 ring buffer、分块接收、驱动事件和发送返回值
+  - 用于验证接近 ESP-IDF UART 驱动的集成行为
+
+推荐顺序：
+
+1. `L1` 先做 `M0` 与 `M1`
+2. `L2` 再做 `fake transport + task` 级别的 `M0/M1`
+3. `L3` 才做 `M2`
+4. `L4` 最后接 STM32 实机
+
 ## 3. 目录与文件落点
 
 建议新增：
@@ -72,11 +99,47 @@
 - `components/services/control_ingress/test`
 - `components/services/behavior_state_service/test`
 
+Mock 支撑目录建议：
+
+- `components/protocols/mcu_link/test/fakes`
+  - `fake_transport.c`
+  - `fake_clock.c`
+  - `fake_event_sink.c`
+  - `byte_stream_harness.c`
+- `components/protocols/mcu_link/test/support`
+  - `frame_builders.c`
+  - `message_builders.c`
+  - `uart_driver_mock.c`
+
 HIL 工具建议：
 
 - `tools/stm32_uart_hil.py`
 
-## 4. 分阶段 TDD 节奏
+## 4. 无 STM32 实机时的测试接口约束
+
+为了支持 Mock 测试，`mcu_link_service` 与相关 service 在实现时必须先抽象以下接口：
+
+- `transport_send_bytes(const uint8_t *data, size_t len)`
+  - 负责真正发送字节流
+- `clock_now_ms()`
+  - 负责超时和心跳计时
+- `event_sink_publish(...)`
+  - 负责对外发布状态和事件
+- `stats_record_*()`
+  - 负责统计计数更新
+
+禁止：
+
+- 在 `mcu_link_fsm` 或协议编解码逻辑里直接调用 ESP-IDF UART API
+- 在 service 逻辑里直接依赖 ISR 或驱动事件结构
+
+要求：
+
+- 协议层必须能在“无 FreeRTOS、无 UART 驱动”的环境下测试
+- 状态机必须能在 fake time 环境下推进
+- service 层必须能通过 fake transport 观察发送结果和 inflight 状态
+
+## 5. 分阶段 TDD 节奏
 
 ### 4.1 阶段 1：协议合同层
 
@@ -228,7 +291,58 @@ HIL 工具建议：
 - 真机场景可重复跑通
 - 有统计输出，不靠手工串口观察
 
-## 5. 每阶段提交规则
+## 6. Mock 数据注入矩阵
+
+无 STM32 实机时，至少要覆盖以下注入场景：
+
+- 握手成功
+  - `HELLO_REQ -> ACK -> HELLO_RSP`
+- 握手拒绝
+  - `HELLO_REQ -> NACK`
+- 握手超时
+  - `HELLO_REQ -> timeout`
+- 恢复成功
+  - `HELLO_REQ -> ACK -> HELLO_RSP -> [SNAPSHOT_REQ -> ACK -> SNAPSHOT_RSP]`
+- 无 snapshot 恢复
+  - `HELLO_REQ -> ACK -> HELLO_RSP(capability without snapshot) -> baseline restore`
+- 动作 accepted + done
+  - `SERVO_MOVE -> ACK -> MOTION_DONE`
+- 动作 accepted + fault
+  - `SERVO_MOVE -> ACK -> FAULT(ref_seq != 0)`
+- 灯效 accepted + done
+  - `LED_SET_EFFECT -> ACK -> LED_DONE`
+- 状态流压力
+  - 高频 `IMU_STATE` + 间歇 `MAG_STATE`
+- 坏帧恢复
+  - 错 CRC
+  - 截断帧
+  - 随机垃圾字节
+  - back-to-back 多帧
+  - chunked 分片输入
+
+这些场景必须按层落地：
+
+- `M0`
+  - 关注状态机、service、映射逻辑
+- `M1`
+  - 关注字节流、解帧、重同步
+- `M2`
+  - 关注驱动集成、接收分块、发送路径
+
+## 7. 无实机阶段的完成标准
+
+在进入真 UART 或 STM32 实机前，必须满足：
+
+- `L1` 和 `L2` 全绿
+- `L3` 的 UART mock 集成测试全绿
+- `ACK/NACK/DONE/FAULT` 全链路可通过 mock 场景重复验证
+- `snapshot` 和 `no-snapshot` 两条恢复路径都已通过 mock
+- 高频 `IMU_STATE` 注入下，`ACK` 处理不会被饿死
+- 所有关键统计字段都能在 mock 场景中被触发和断言
+
+只有满足这些条件，才进入真 UART 驱动联调和 STM32 实机 HIL。
+
+## 8. 每阶段提交规则
 
 - 一阶段至少两个提交：
   - `test:` 先引入失败测试
@@ -243,7 +357,7 @@ HIL 工具建议：
 - `refactor:`
 - `docs:`
 
-## 6. 观察指标
+## 9. 观察指标
 
 开发过程中必须持续统计：
 
@@ -259,10 +373,11 @@ HIL 工具建议：
 - HIL 输出
 - 回归记录
 
-## 7. 非目标
+## 10. 非目标
 
 本计划不包含：
 
 - STM32 固件升级 TDD
 - 上位机 GUI 自动化
 - 对外 WebSocket 协议回归脚本
+- 在没有完成 `L1-L3 mock` 前直接上 STM32 实机调协议
