@@ -32,7 +32,7 @@ typedef struct {
     uint8_t secondary_blue;
     uint8_t brightness;
     uint8_t effect_id;
-    uint16_t period_ms;
+    uint16_t period_ms;   /* static mode -> hold_ms, effect mode -> period_ms */
     uint16_t repeat_count;
 } mcu_led_request_t;
 
