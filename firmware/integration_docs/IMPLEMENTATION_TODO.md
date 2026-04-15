@@ -14,127 +14,113 @@
 
 ## 2. 下一阶段总目标
 
-把当前“ESP32 本地舵机 + 协处理器链路骨架”的状态，推进到“ESP32 以 STM32 UART 协处理器为唯一运行时后端”的下一检查点。
+把当前“ESP32 已切到 STM32 UART 后端，但 live dispatch 和业务层切换尚未完成”的状态，推进到“ESP32 具备完整运行时事件分发与上层接入能力”的下一检查点。
 
 ## 3. 已冻结的待办
 
-### TODO-001：GPIO19/20 切到运行时 UART
+### 已完成：上一阶段待办
+
+以下工作已完成，不再作为下一阶段待办：
+
+- `GPIO19/20` 已切到运行时 UART
+- 本地 `hal_servo` PWM 后端已移除
+- `mcu_link` 已接入最小 RX / 解帧 / `HELLO_RSP / ACK / NACK / FAULT`
+- `mcu_led_service` 已接入实际帧下发
+- `mcu_sensor_service` 已接入缓存与 `latest-state-wins`
+
+### TODO-006：把 `mcu_link` live frame 分发给业务服务
 
 目标：
 
-- ESP32 侧将 `GPIO19/20` 从当前本地舵机 PWM 释放出来
-- 直接作为 `ESP32 <-> STM32` 的运行时 UART 引脚
+- 让 `mcu_link` 收到的运行时消息真正驱动 `mcu_motion_service / mcu_led_service / mcu_sensor_service`
+- 不再停留在“只更新 FSM 和 stats”的层面
 
 边界：
 
-- `GPIO19` / `GPIO20` 不再由本地 `hal_servo` LEDC 使用
-- `mcu_link_uart` 成为这组引脚的唯一运行时占用方
-- 当前本地双舵机控制模块从运行路径移除
-
-最低验收：
-
-- `hal_servo` 不再直接驱动 `GPIO19/20`
-- `mcu_link_uart` 可在 `GPIO19/20` 上初始化成功
-- 板级启动后，串口日志中能明确看到协处理器 UART runtime 已启用
-
-### TODO-002：移除当前本地舵机控制模块
-
-目标：
-
-- 把当前 `hal_servo` 从“本地 PWM 驱动器”收缩为“兼容入口 / 参数校验层”
-- 实际动作执行统一走 `mcu_motion_service -> mcu_link`
-
-边界：
-
-- 保留 `hal_servo_*` 对上兼容接口
-- 去除本地舵机 task、LEDC PWM 运行路径
-- 保留角度校验、Y 轴限幅、source 语义
-
-最低验收：
-
-- `control_ingress` 下发的舵机动作不再触发本地 PWM
-- `behavior_state_service` 下发的舵机动作不再触发本地 PWM
-- 现有 servo 控制入口仍可用，但实际执行统一走 `mcu_motion_service -> mcu_link`
-
-### TODO-003：接入 `mcu_link` RX / 解帧 / `HELLO_RSP` / `ACK` / `FAULT`
-
-目标：
-
-- 让 `mcu_link` 从“只会发 `HELLO_REQ`”推进到“具备最小收包与状态推进能力”
-
-边界：
-
-- 接入 UART RX
-- 以 `0x00 delimiter + COBS + CRC16` 完成解帧
-- 至少处理：
-  - `HELLO_RSP`
-  - `ACK`
-  - `NACK`
-  - `FAULT`
-- 能推进：
-  - `DOWN -> HANDSHAKING -> LINK_READY`
-  - 故障与错误统计更新
-
-最低验收：
-
-- 能在 mock 和真机上正确处理 `HELLO_RSP`
-- `ACK / NACK / FAULT` 能进入统计和日志
-- 收到错误 CRC 帧时能丢弃并继续同步
-
-### TODO-004：接入 `mcu_led_service` 实际帧下发
-
-目标：
-
-- 把 `mcu_led_service` 从占位实现推进到真实协议下发
-
-边界：
-
-- 支持 `LED_SET_STATIC`
-- 支持 `LED_SET_EFFECT`
-- 支持 `LED_OFF`
-- 通过 `mcu_link` 发送帧，不直接做本地灯效
-
-最低验收：
-
-- 能构出正确 `LED` 类消息
-- `ACK / DONE / FAULT` 路径有接口位置
-- 在 link 未 ready 时不破坏现有系统行为
-
-### TODO-005：接入 sensor 上行缓存与 `latest-state-wins`
-
-目标：
-
-- 把 `mcu_sensor_service` 从本地缓存组件推进到 STM32 上行状态的实际消费端
-
-边界：
-
+- 接入 `MOTION_DONE`
+- 接入 `LED_DONE`
 - 接入 `TOUCH_EVENT`
 - 接入 `IMU_STATE`
 - 接入 `MAG_STATE`
-- 对 `IMU_STATE / MAG_STATE` 使用 `latest-state-wins`
-- 事件和状态分开处理
+- `ACK / NACK / FAULT` 至少能进入 service 可消费接口
 
 最低验收：
 
-- 高频 `IMU_STATE` 不导致控制 ACK 饥饿
-- `dropped_state_count` 可统计
-- 上层能获取最新 touch / imu / mag 快照
+- mock 场景下，live frame 能进入对应 service
+- service 层状态不再只依赖本地缓存 API 手动更新
+- `motion_done_fault_count / dropped_state_count` 能在运行时闭环更新
+
+### TODO-007：安排 `mcu_link` 运行时 poll / dispatch 调度
+
+目标：
+
+- 给 `mcu_link_poll()` 找到稳定的运行时执行点
+- 避免只有 bootstrap 初始化，没有持续收包能力
+
+边界：
+
+- 不要求一开始就引入复杂新任务树
+- 允许先用轻量 poll task / timer 驱动
+- 不能阻塞现有 BLE / Wi-Fi / UI 主路径
+
+最低验收：
+
+- 运行时能持续处理 UART 上行
+- 丢包 / CRC 错误后仍可继续同步
+- 板级 smoke 下不引入新的启动阻塞
+
+### TODO-008：切换上层业务入口到协处理器语义
+
+目标：
+
+- 让 `control_ingress / behavior_state_service / BLE / WS` 真正消费协处理器返回语义
+- 保持外部协议尽量不变
+
+边界：
+
+- `control_ingress` 要能处理远端 busy / not_ready / fault
+- `behavior_state_service` 要能处理 stop / interrupted / done
+- BLE / WS 外部 `sys.ack / sys.nack` 语义不改版
+
+最低验收：
+
+- 手动控制和行为动作都不再依赖本地舵机语义
+- 外部协议仍保持兼容
+- 常见失败路径能给出稳定错误映射
+
+### TODO-009：启动真实 STM32 UART 闭环联调
+
+目标：
+
+- 把当前 mock 闭环推进到真实协处理器联调
+- 验证协议、恢复、频率和背压假设
+
+边界：
+
+- 最少覆盖 `HELLO / ACK / NACK / FAULT`
+- 最少覆盖 motion / led / sensor 各 1 条真实链路
+- 不在这一阶段展开 STM32 固件升级
+
+最低验收：
+
+- 真实 UART 链路可以稳定握手
+- `MOTION_DONE / LED_DONE / sensor state` 至少有一条真实闭环
+- HIL 脚本可以从 `mock` 切换到 `serial`
 
 ## 4. 顺序约束
 
 下一阶段执行顺序冻结为：
 
-1. `GPIO19/20` 运行时 UART 切换
-2. 本地舵机 PWM 后端移除
-3. `mcu_link` RX / 解帧 / `HELLO_RSP / ACK / FAULT`
-4. `mcu_led_service` 实际帧下发
-5. sensor 上行缓存与 `latest-state-wins`
+1. `mcu_link` live frame -> service 分发
+2. `mcu_link` 运行时 poll / dispatch 调度
+3. 上层业务入口切换到协处理器语义
+4. 真实 STM32 UART 闭环联调
 
-不建议跳步直接做 sensor 或 LED，因为当前最关键的架构切换点仍是：
+不建议跳步直接做 BLE / WS 回归，因为当前最关键的缺口仍是：
 
-- UART 引脚所有权
-- 本地舵机后端退场
-- `mcu_link` 从单向发送骨架进入双向链路
+- live frame 还没进入业务层
+- 运行时收包调度还没固定
+- mock 闭环还没切到真实 STM32
 
 ## 5. 非目标
 
