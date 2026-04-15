@@ -2,12 +2,11 @@ menu "MCU Link"
 
 config WATCHER_MCU_LINK_UART_ENABLE
     bool "Enable runtime UART transport for STM32 coprocessor link"
-    default n
+    default y
     help
         Enables the UART transport scaffold for the STM32 coprocessor runtime
-        link. Keep this disabled while the local LEDC servo backend still owns
-        GPIO19/GPIO20. Enable it once the board is ready to hand those pins to
-        the coprocessor UART.
+        link. In v2, GPIO19/GPIO20 are reserved for the coprocessor runtime
+        UART and this transport is the default runtime owner of those pins.
 
 if WATCHER_MCU_LINK_UART_ENABLE
 

@@ -1337,8 +1337,12 @@ void app_main(void) {
     boot_anim_start_intro(EMOJI_ANIM_BOOT, boot_frame_count, BOOT_ANIM_INTERVAL_MS);
     boot_anim_set_text("Preparing...");
 
-    /* 4. Servo HAL init (GPIO 19/20 LEDC PWM, Phase 2 implementation) */
+    /* 4. Coprocessor link bootstrap (GPIO 19/20 runtime UART) */
     boot_anim_set_progress(25);
+    boot_anim_set_text("MCU Link...");
+    init_mcu_link_bootstrap();
+
+    /* 4.5 Servo compatibility facade (no local PWM backend). */
     boot_anim_set_text("Servo...");
     hal_servo_init();
 
@@ -1352,9 +1356,6 @@ void app_main(void) {
         boot_halt_with_error("Control init failed");
     }
     LOG_HEAP_STATE("after_control_ingress");
-
-    /* 5.25 Coprocessor protocol scaffold (no UART wiring yet). */
-    init_mcu_link_bootstrap();
 
     /* 5.5 BLE control + provisioning */
     boot_anim_set_progress(35);
