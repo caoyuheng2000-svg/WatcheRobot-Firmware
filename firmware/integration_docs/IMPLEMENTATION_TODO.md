@@ -27,6 +27,9 @@
 - `mcu_link` 已接入最小 RX / 解帧 / `HELLO_RSP / ACK / NACK / FAULT`
 - `mcu_led_service` 已接入实际帧下发
 - `mcu_sensor_service` 已接入缓存与 `latest-state-wins`
+- `mcu_link_poll()` 已接入主循环持续调度
+- motion / led 已改成仅在 `READY` 后放行业务帧
+- `hal_servo_init()` 失败已升级为启动期 halt
 
 ### TODO-006：把 `mcu_link` live frame 分发给业务服务
 
@@ -50,26 +53,45 @@
 - service 层状态不再只依赖本地缓存 API 手动更新
 - `motion_done_fault_count / dropped_state_count` 能在运行时闭环更新
 
-### TODO-007：安排 `mcu_link` 运行时 poll / dispatch 调度
+### TODO-007：把最小 safe-default bootstrap 替换成正式 baseline restore
 
 目标：
 
-- 给 `mcu_link_poll()` 找到稳定的运行时执行点
-- 避免只有 bootstrap 初始化，没有持续收包能力
+- 让 `HELLO_RSP -> READY` 的推进不再依赖当前的最小 safe-default bootstrap
+- 明确首次启动和恢复场景到底依据 `snapshot` 还是安全默认基线
 
 边界：
 
-- 不要求一开始就引入复杂新任务树
-- 允许先用轻量 poll task / timer 驱动
-- 不能阻塞现有 BLE / Wi-Fi / UI 主路径
+- 优先覆盖 `no-snapshot` 的安全默认基线
+- 若 `snapshot` capability 存在，则至少保留清晰的接入点
+- 不在这一阶段扩展成 STM32 固件升级或复杂脚本机制
 
 最低验收：
 
-- 运行时能持续处理 UART 上行
-- 丢包 / CRC 错误后仍可继续同步
-- 板级 smoke 下不引入新的启动阻塞
+- `READY` 的进入条件和文档定义一致
+- 冷启动与恢复路径都能解释“基线从哪里来”
+- 不再需要在 bootstrap 层直接调用“最小兜底”推进 ready
 
-### TODO-008：切换上层业务入口到协处理器语义
+### TODO-008：补齐串口 bring-up 期间的 service 级观测和 bench 清单
+
+目标：
+
+- 让首次真实 STM32 串口调试时，ESP32 侧能明确看见 service 级 accepted / rejected / done / fault
+- 把 bench 期间必须执行的检查项固定下来，避免现场调试口径漂移
+
+边界：
+
+- 至少覆盖 motion / led / sensor 各 1 条 service 观测路径
+- 至少覆盖 `HELLO / ACK / NACK / FAULT / DONE`
+- 允许先通过日志和统计暴露，不要求一步到位做 UI 展示
+
+最低验收：
+
+- 串口 bring-up 期间可以从 ESP32 日志判断“卡在哪一层”
+- 每次 bench 调试都能按固定 checklist 执行
+- `motion_done_fault_count / ack_timeout_count / reconnect_count` 能用于现场判断
+
+### TODO-009：切换上层业务入口到协处理器语义
 
 目标：
 
@@ -88,7 +110,7 @@
 - 外部协议仍保持兼容
 - 常见失败路径能给出稳定错误映射
 
-### TODO-009：启动真实 STM32 UART 闭环联调
+### TODO-010：启动真实 STM32 UART 闭环联调
 
 目标：
 
@@ -112,14 +134,15 @@
 下一阶段执行顺序冻结为：
 
 1. `mcu_link` live frame -> service 分发
-2. `mcu_link` 运行时 poll / dispatch 调度
-3. 上层业务入口切换到协处理器语义
-4. 真实 STM32 UART 闭环联调
+2. 正式 baseline restore
+3. 串口 bring-up 期间的 service 级观测和 bench checklist
+4. 上层业务入口切换到协处理器语义
+5. 真实 STM32 UART 闭环联调
 
 不建议跳步直接做 BLE / WS 回归，因为当前最关键的缺口仍是：
 
 - live frame 还没进入业务层
-- 运行时收包调度还没固定
+- 正式 baseline restore 还没替换当前最小兜底策略
 - mock 闭环还没切到真实 STM32
 
 ## 5. 非目标

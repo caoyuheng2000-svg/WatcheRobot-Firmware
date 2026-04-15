@@ -36,12 +36,12 @@ static esp_err_t mcu_motion_submit_runtime_frame(const mcu_motion_request_t *req
 
     link = mcu_link_bootstrap_get_link();
     if (link == NULL) {
-        return ESP_OK;
+        return ESP_ERR_INVALID_STATE;
     }
 
-    if (!mcu_link_bootstrap_is_link_ready()) {
-        ESP_LOGD(TAG, "MCU link not ready; caching motion request only");
-        return ESP_OK;
+    if (!mcu_link_bootstrap_is_ready()) {
+        ESP_LOGW(TAG, "MCU link not fully ready; rejecting motion request");
+        return ESP_ERR_INVALID_STATE;
     }
 
     payload[0] = request->axis_mask;
@@ -73,12 +73,12 @@ static esp_err_t mcu_motion_submit_stop_frame(mcu_motion_source_t source)
 
     link = mcu_link_bootstrap_get_link();
     if (link == NULL) {
-        return ESP_OK;
+        return ESP_ERR_INVALID_STATE;
     }
 
-    if (!mcu_link_bootstrap_is_link_ready()) {
-        ESP_LOGD(TAG, "MCU link not ready; stop request not mirrored");
-        return ESP_OK;
+    if (!mcu_link_bootstrap_is_ready()) {
+        ESP_LOGW(TAG, "MCU link not fully ready; rejecting stop request");
+        return ESP_ERR_INVALID_STATE;
     }
 
     payload[0] = (uint8_t)source;
@@ -136,9 +136,16 @@ esp_err_t mcu_motion_submit(const mcu_motion_request_t *request)
         return ESP_ERR_INVALID_ARG;
     }
 
-    s_last_request = *request;
-    s_has_last_request = true;
-    return mcu_motion_submit_runtime_frame(request);
+    {
+        esp_err_t ret = mcu_motion_submit_runtime_frame(request);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+
+        s_last_request = *request;
+        s_has_last_request = true;
+        return ESP_OK;
+    }
 }
 
 esp_err_t mcu_motion_service_get_last_request(mcu_motion_request_t *out_request)

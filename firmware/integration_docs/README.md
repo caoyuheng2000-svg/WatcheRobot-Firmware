@@ -10,11 +10,12 @@
 2. [STM32_UART_PROTOCOL.md](./STM32_UART_PROTOCOL.md)
 3. [IMPLEMENTATION_STATUS.md](./IMPLEMENTATION_STATUS.md)
 4. [IMPLEMENTATION_TODO.md](./IMPLEMENTATION_TODO.md)
-5. [TDD_EXECUTION_PLAN.md](./TDD_EXECUTION_PLAN.md)
-6. [RISK_REGISTER.md](./RISK_REGISTER.md)
-7. [HIL_TEST_PLAN.md](./HIL_TEST_PLAN.md)
-8. [BRANCH_WORKTREE_PLAN.md](./BRANCH_WORKTREE_PLAN.md)
-9. [adr/](./adr)
+5. [FIELD_REVIEW_TODO.md](./FIELD_REVIEW_TODO.md)
+6. [TDD_EXECUTION_PLAN.md](./TDD_EXECUTION_PLAN.md)
+7. [RISK_REGISTER.md](./RISK_REGISTER.md)
+8. [HIL_TEST_PLAN.md](./HIL_TEST_PLAN.md)
+9. [BRANCH_WORKTREE_PLAN.md](./BRANCH_WORKTREE_PLAN.md)
+10. [adr/](./adr)
 
 ## 2. 文档职责
 
@@ -31,6 +32,8 @@
   - 当前集成分支已经落到哪一步、哪些检查已经通过
 - [IMPLEMENTATION_TODO.md](./IMPLEMENTATION_TODO.md)
   - 已冻结但尚未实施的下一阶段待办
+- [FIELD_REVIEW_TODO.md](./FIELD_REVIEW_TODO.md)
+  - 首次真实 STM32 串口调试前，ESP32 侧仍需完成的检查点和 bench 清单
 - [TDD_EXECUTION_PLAN.md](./TDD_EXECUTION_PLAN.md)
   - 测试驱动实施节奏、阶段出口和测试文件落点
 - [HIL_TEST_PLAN.md](./HIL_TEST_PLAN.md)
@@ -83,10 +86,10 @@
 截至 `2026-04-15`，`v2.0.0-refactor` 已落到以下检查点：
 
 - 文档真源、TDD 计划、风险清单、HIL 计划均已冻结
-- ESP32 侧 `mcu_link` 已有协议骨架、UART scaffold 和 `HELLO_REQ` bootstrap 发送路径
-- `mcu_motion_service` 已能在 `mcu_link` 进入 `link_ready` 时镜像下发 `SERVO_MOVE / SERVO_STOP`
-- 当前板级验证仍保留本地 `hal_servo` PWM 后端，`GPIO19/20` 尚未切换为运行时 UART
-- 本地自动化检查与 `COM28` 板级 smoke 已通过，详见 [IMPLEMENTATION_STATUS.md](./IMPLEMENTATION_STATUS.md)
+- ESP32 侧 `mcu_link` 已有协议骨架、UART scaffold、运行时 poll 和 `HELLO_RSP / ACK / NACK / FAULT` 最小消费路径
+- `hal_servo` 已退化为协处理器兼容入口，本地 PWM 后端已移除，`GPIO19/20` 已切到运行时 UART
+- `mcu_motion_service` / `mcu_led_service` 现在只在 `READY` 后放行业务帧，链路未就绪时返回显式错误
+- 本地自动化检查、mock HIL、故障注入和 `COM28` 板级 smoke 已通过，详见 [IMPLEMENTATION_STATUS.md](./IMPLEMENTATION_STATUS.md)
 
 ## 6. 相关参考
 

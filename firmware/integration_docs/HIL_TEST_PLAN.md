@@ -109,7 +109,16 @@ ESP32 <---- UART 921600 ----> STM32
 - 阶段合并前：跑回归用例
 - 协议或链路层改动后：跑故障注入用例
 
-## 7. 日志要求
+## 7. 从 mock 切到真实 serial 前的前置条件
+
+切到真实 STM32 串口 HIL 之前，ESP32 侧至少需要满足：
+
+- `mcu_link` live frame 已能进入 motion / led / sensor service
+- `READY` 已来自正式 baseline restore，而不是临时 bootstrap 兜底
+- `ack_timeout_count / reconnect_count / motion_done_fault_count / dropped_state_count` 可稳定输出
+- bench 执行顺序已冻结，参见 [FIELD_REVIEW_TODO.md](./FIELD_REVIEW_TODO.md)
+
+## 8. 日志要求
 
 ESP32 日志至少包含：
 
@@ -122,7 +131,7 @@ ESP32 日志至少包含：
 
 HIL 日志输出中不得只写“失败”，必须带可定位字段。
 
-## 8. 非目标
+## 9. 非目标
 
 本计划不覆盖：
 

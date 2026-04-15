@@ -53,9 +53,13 @@ static esp_err_t mcu_led_submit_runtime_frame(const mcu_led_request_t *request)
     }
 
     link = mcu_link_bootstrap_get_link();
-    if (link == NULL || !mcu_link_bootstrap_is_link_ready()) {
-        ESP_LOGD(TAG, "MCU link not ready; LED request cached only");
-        return ESP_OK;
+    if (link == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!mcu_link_bootstrap_is_ready()) {
+        ESP_LOGW(TAG, "MCU link not fully ready; rejecting LED request");
+        return ESP_ERR_INVALID_STATE;
     }
 
     switch (request->mode) {
@@ -120,9 +124,16 @@ esp_err_t mcu_led_submit(const mcu_led_request_t *request)
         return ESP_ERR_INVALID_ARG;
     }
 
-    s_last_request = *request;
-    s_has_last_request = true;
-    return mcu_led_submit_runtime_frame(request);
+    {
+        esp_err_t ret = mcu_led_submit_runtime_frame(request);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+
+        s_last_request = *request;
+        s_has_last_request = true;
+        return ESP_OK;
+    }
 }
 
 esp_err_t mcu_led_service_get_last_request(mcu_led_request_t *out_request)

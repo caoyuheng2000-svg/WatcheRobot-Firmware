@@ -10,5 +10,5 @@ idf_component_register(
         "src/mcu_link_uart.c"
         "src/mcu_link_bootstrap.c"
     INCLUDE_DIRS "include"
-    REQUIRES driver
+    REQUIRES driver esp_timer
 )

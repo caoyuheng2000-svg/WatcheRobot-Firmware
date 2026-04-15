@@ -533,6 +533,27 @@ static void init_mcu_link_bootstrap(void) {
              mcu_link_bootstrap_is_ready() ? 1 : 0);
 }
 
+static void service_mcu_link_runtime(void) {
+    int processed = 0;
+
+    while (processed < 4) {
+        mcu_link_event_t event = {0};
+        esp_err_t ret = mcu_link_bootstrap_poll(&event);
+
+        if (ret == ESP_OK) {
+            processed++;
+            continue;
+        }
+
+        if (ret == ESP_ERR_NOT_FOUND || ret == ESP_ERR_INVALID_STATE) {
+            return;
+        }
+
+        ESP_LOGW(TAG, "MCU link runtime poll failed: %s", esp_err_to_name(ret));
+        return;
+    }
+}
+
 // static void run_camera_boot_diag(void) {
 //     // Camera module intentionally disabled.
 //     // The original boot diagnostic flow is kept here in comments for easy restoration.
@@ -1344,7 +1365,10 @@ void app_main(void) {
 
     /* 4.5 Servo compatibility facade (no local PWM backend). */
     boot_anim_set_text("Servo...");
-    hal_servo_init();
+    if (hal_servo_init() != ESP_OK) {
+        ESP_LOGE(TAG, "Servo facade init failed");
+        boot_halt_with_error("Servo init failed");
+    }
 
     /* 5. Initialize app state only. Input devices stay disabled during BLE provisioning. */
     boot_anim_set_progress(30);
@@ -1424,6 +1448,7 @@ void app_main(void) {
     esp_task_wdt_add(NULL);
     while (1) {
         esp_task_wdt_reset();
+        service_mcu_link_runtime();
         transport_coordinator_tick();
         maybe_play_ble_connected_feedback();
         apply_idle_hint_if_needed();
