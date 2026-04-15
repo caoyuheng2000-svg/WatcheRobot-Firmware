@@ -2,7 +2,7 @@
 
 > 目的：冻结 `v2.0.0` 的总体重构边界，明确 ESP32 与 STM32 的职责分工、启动恢复口径、风险约束与实施阶段。
 >
-> 关系说明：本文是系统设计真源；板内串口协议的唯一真源见 `docs/STM32_UART_PROTOCOL.md`。对外网络协议仍以 `docs/COMM_PROTOCOL_FREEZE.md` 与 `docs/BLE_GATT_PROTOCOL_BRIDGE.md` 为基线。
+> 关系说明：本文是系统设计真源；板内串口协议的唯一真源见 `STM32_UART_PROTOCOL.md`。对外网络协议仍以 `../s3/docs/COMM_PROTOCOL_FREEZE.md` 与 `../s3/docs/BLE_GATT_PROTOCOL_BRIDGE.md` 为基线。
 
 ## 1. 目标与范围
 
@@ -228,7 +228,7 @@ ESP32 当前已有 BLE、WS、UI、行为状态机与相机路径，因此新增
 
 `v2.0.0` 第一轮文档和实现应满足：
 
-- 实现者仅阅读本文与 `docs/STM32_UART_PROTOCOL.md`，即可知道 ESP32 与 STM32 的职责和边界
+- 实现者仅阅读本文与 `STM32_UART_PROTOCOL.md`，即可知道 ESP32 与 STM32 的职责和边界
 - ESP32 侧接口名、状态名、错误口径在文档与实现中保持一致
 - UART 协议不再依赖临时口头约定
 - 后续代码实现不需要再重新设计握手、ACK/DONE、频率和背压策略
@@ -237,8 +237,7 @@ ESP32 当前已有 BLE、WS、UI、行为状态机与相机路径，因此新增
 
 本方案的本地真源如下：
 
-- 当前外部通信基线：`docs/COMM_PROTOCOL_FREEZE.md`
-- 当前 BLE 本地桥接语义：`docs/BLE_GATT_PROTOCOL_BRIDGE.md`
-- 当前相机协处理器设计经验：`docs/COPROC_COMM_DEV_DESIGN.md`
-- 本轮板内 UART 协议真源：`docs/STM32_UART_PROTOCOL.md`
-
+- 当前外部通信基线：`../s3/docs/COMM_PROTOCOL_FREEZE.md`
+- 当前 BLE 本地桥接语义：`../s3/docs/BLE_GATT_PROTOCOL_BRIDGE.md`
+- 当前相机协处理器设计经验：`../s3/docs/COPROC_COMM_DEV_DESIGN.md`
+- 本轮板内 UART 协议真源：`STM32_UART_PROTOCOL.md`

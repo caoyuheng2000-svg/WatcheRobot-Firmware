@@ -4,7 +4,7 @@
 >
 > 范围：只覆盖运行时控制与状态同步，不覆盖 STM32 固件升级。
 >
-> 关系说明：系统分层和职责边界见 `docs/STM32_COPROC_REFACTOR_PLAN.md`。对外网络协议仍以 `docs/COMM_PROTOCOL_FREEZE.md` 与 `docs/BLE_GATT_PROTOCOL_BRIDGE.md` 为基线。
+> 关系说明：系统分层和职责边界见 `STM32_COPROC_REFACTOR_PLAN.md`。对外网络协议仍以 `../s3/docs/COMM_PROTOCOL_FREEZE.md` 与 `../s3/docs/BLE_GATT_PROTOCOL_BRIDGE.md` 为基线。
 
 ## 1. 设计目标
 
@@ -554,8 +554,7 @@ ESP32 与 STM32 两侧都必须遵守以下背压策略：
 
 本文的相关参考如下：
 
-- 当前外部协议基线：`docs/COMM_PROTOCOL_FREEZE.md`
-- 当前 BLE 桥接语义：`docs/BLE_GATT_PROTOCOL_BRIDGE.md`
-- 当前协处理器设计经验：`docs/COPROC_COMM_DEV_DESIGN.md`
-- 本轮系统边界真源：`docs/STM32_COPROC_REFACTOR_PLAN.md`
-
+- 当前外部协议基线：`../s3/docs/COMM_PROTOCOL_FREEZE.md`
+- 当前 BLE 桥接语义：`../s3/docs/BLE_GATT_PROTOCOL_BRIDGE.md`
+- 当前协处理器设计经验：`../s3/docs/COPROC_COMM_DEV_DESIGN.md`
+- 本轮系统边界真源：`STM32_COPROC_REFACTOR_PLAN.md`
