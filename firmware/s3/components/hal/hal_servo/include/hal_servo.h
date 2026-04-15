@@ -26,6 +26,20 @@ typedef enum {
 } servo_axis_t;
 
 /**
+ * @brief Motion source tags used by the optional coprocessor bridge.
+ *
+ * The local LEDC backend does not need the source tag, but the bridge path
+ * uses it to keep motion attribution compatible with the UART refactor plan.
+ */
+typedef enum {
+    HAL_SERVO_MOTION_SOURCE_UNKNOWN = 0,
+    HAL_SERVO_MOTION_SOURCE_BEHAVIOR = 1,
+    HAL_SERVO_MOTION_SOURCE_BLE = 2,
+    HAL_SERVO_MOTION_SOURCE_WS = 3,
+    HAL_SERVO_MOTION_SOURCE_RECOVERY = 4,
+} hal_servo_motion_source_t;
+
+/**
  * @brief Initialize servo HAL with LEDC PWM output.
  *
  * Configures GPIO 19 (X axis) and GPIO 20 (Y axis) as LEDC PWM channels
@@ -77,6 +91,10 @@ esp_err_t hal_servo_set_angle(servo_axis_t axis, int angle_deg);
  * @return ESP_OK on success
  */
 esp_err_t hal_servo_move_smooth(servo_axis_t axis, int angle_deg, int duration_ms);
+esp_err_t hal_servo_move_smooth_with_source(servo_axis_t axis,
+                                            int angle_deg,
+                                            int duration_ms,
+                                            hal_servo_motion_source_t source);
 
 /**
  * @brief Move both axes simultaneously.
@@ -90,6 +108,10 @@ esp_err_t hal_servo_move_smooth(servo_axis_t axis, int angle_deg, int duration_m
  * @return ESP_OK on success
  */
 esp_err_t hal_servo_move_sync(int x_deg, int y_deg, int duration_ms);
+esp_err_t hal_servo_move_sync_with_source(int x_deg,
+                                          int y_deg,
+                                          int duration_ms,
+                                          hal_servo_motion_source_t source);
 
 /**
  * @brief Send servo command by axis name string (for WebSocket handler).
@@ -117,6 +139,7 @@ esp_err_t hal_servo_send_cmd(const char *id, int angle_deg, int duration_ms);
  * @return ESP_OK on success, ESP_ERR_INVALID_STATE if servo HAL is not ready
  */
 esp_err_t hal_servo_cancel_all(void);
+esp_err_t hal_servo_cancel_all_with_source(hal_servo_motion_source_t source);
 
 /**
  * @brief Get current servo angle.
