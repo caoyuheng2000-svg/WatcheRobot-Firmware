@@ -219,6 +219,10 @@ v1 单位冻结为：
 - `sensor_bitmap`
 - `boot_reason`
 - `default_stream_profile`
+  - 类型：`uint8 profile_id`
+  - 语义：STM32 默认采用的传感器上报档位
+  - 本字段只覆盖 `touch / imu / magnetometer / sensor_health` 的板内上报策略
+  - 与 camera 抓拍、BLE、WS 无关
 
 `capability_bitmap` 冻结位定义：
 
@@ -227,13 +231,37 @@ v1 单位冻结为：
 - `bit2 = touch`
 - `bit3 = imu`
 - `bit4 = magnetometer`
-- `bit5 = snapshot`
+- `bit5 = runtime_state_snapshot`
+  - `snapshot` 在本文中专指“运行时状态快照能力”
+  - 不表示 camera 抓拍或图片快照
 
 `sensor_bitmap` 冻结位定义：
 
 - `bit0 = touch`
 - `bit1 = imu`
 - `bit2 = magnetometer`
+
+`default_stream_profile` 冻结如下：
+
+- `0x00 = reserved`
+- `0x01 = v1_default`
+- `0x80..0xFF = vendor_reserved`
+
+v1 中仅允许 `0x01 = v1_default`，其语义固定为：
+
+- `TOUCH_EVENT = 开启，边沿即时上报`
+- `IMU_EVENT = 开启，变化即时上报`
+- `IMU_STATE = 开启，20 Hz`
+- `MAG_EVENT = 开启，变化即时上报`
+- `MAG_STATE = 开启，2 Hz`
+- `SENSOR_HEALTH = 开启，变化上报`
+- `MOTION_STATE = 关闭，调试构建才允许开启`
+- `LED_STATE = 命令后或故障后上报`
+
+兼容性规则：
+
+- ESP32 收到未知 `default_stream_profile` 时，不得进入 `coprocessor_ready`
+- 已冻结的 `profile_id` 语义后续不得重定义，只能新增新的 `profile_id`
 
 ### 7.3 `ACK`
 
@@ -538,16 +566,18 @@ ESP32 与 STM32 两侧都必须遵守以下背压策略：
 
 1. 重新发 `HELLO_REQ`
 2. 收到 `HELLO_RSP` 后校验版本与能力位
-3. 若 `capability_bitmap.bit5(snapshot) = 1`，发 `SNAPSHOT_REQ`
-4. 若支持 `snapshot`，用 `SNAPSHOT_RSP` 恢复当前动作/LED/传感器健康基线
+3. 若 `capability_bitmap.bit5(runtime_state_snapshot) = 1`，发 `SNAPSHOT_REQ`
+4. 若支持 `runtime_state_snapshot`，用 `SNAPSHOT_RSP` 恢复当前动作/LED/传感器健康基线
 5. 若不支持 `snapshot`，ESP32 使用本地缓存的最后已知基线状态或默认安全基线重新同步 STM32
 6. 待快照恢复或本地基线恢复完成后，再允许新业务命令
 
-`SNAPSHOT_RSP` 仅在 `capability_bitmap.bit5(snapshot) = 1` 时出现，且至少应包含：
+`SNAPSHOT_RSP` 仅在 `capability_bitmap.bit5(runtime_state_snapshot) = 1` 时出现，且至少应包含：
 
 - 当前舵机位置
 - 当前 LED 模式
 - 当前传感器健康位
+
+`SNAPSHOT_RSP` 在 v1 中不承载 camera 状态，不承载图片或视频快照。
 
 ## 12. 与现有外部协议的映射
 

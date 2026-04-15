@@ -155,6 +155,8 @@ STM32 明确不负责：
 6. ESP32 执行基线同步与恢复
    - 若支持 `snapshot`，先发 `SNAPSHOT_REQ` 并恢复当前舵机位置、LED 模式与传感器健康位
    - 传感器流配置在 v1 中不单独下发命令，直接采用 `HELLO_RSP.default_stream_profile`
+   - 若不支持 `snapshot` 且本地没有可信缓存，ESP32 必须下发固定安全基线，而不是依赖 STM32 上电默认态
+   - 固定安全基线在 v1 中冻结为：舵机进入板级安全停泊位、LED 关闭、传感器流采用 `default_stream_profile`
    - ESP32 只在本地缓存与 STM32 快照不一致时补发舵机/LED 基线状态
 7. ESP32 标记 `coprocessor_ready`
 8. 业务层开始允许动作与灯效命令

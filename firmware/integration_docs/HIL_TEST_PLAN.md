@@ -48,6 +48,7 @@ ESP32 <---- UART 921600 ----> STM32
 - `crc_error_count`
 - `dropped_state_count`
 - `reconnect_count`
+- `motion_done_fault_count`
 - `notes`
 
 ## 4. 用例矩阵

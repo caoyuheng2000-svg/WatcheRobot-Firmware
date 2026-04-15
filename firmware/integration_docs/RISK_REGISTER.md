@@ -18,7 +18,7 @@
 | `R-001` | `P0` | 协议语义漂移 | ESP32 与 STM32 各自维护消息表 | 以 `STM32_UART_PROTOCOL.md` 为唯一真源，协议常量集中定义 | 双端消息枚举和字段一致，协议测试全绿 |
 | `R-002` | `P0` | ACK 被状态流饿死 | IMU / 地磁上报频率过高 | `ack_queue` 高优先级，状态采用 `latest-state-wins` | 高频注入下 ACK 延迟仍受控 |
 | `R-003` | `P0` | 控制链语义失真 | 上层把 accepted 当 done | 强制使用 `ACK + DONE/FAULT` 模型 | 行为状态机和 BLE/WS 都不依赖同步执行完成 |
-| `R-004` | `P0` | 掉线恢复不完整 | STM32 复位后 ESP32 只重连不重配 | 固化 `HELLO -> SNAPSHOT -> baseline restore` | 复位恢复用例通过 |
+| `R-004` | `P0` | 掉线恢复不完整 | STM32 复位后 ESP32 只重连不重配 | 固化 `HELLO -> [SNAPSHOT if supported] -> baseline restore` | 复位恢复用例通过 |
 | `R-005` | `P0` | 多源命令冲突 | BLE、WS、行为状态机同时发动作 | 统一通过 `control_ingress -> mcu_motion_service` 仲裁 | 并发命令场景可预测且可回归 |
 | `R-006` | `P1` | STM32F103 资源不足 | 同时跑高频 IMU、复杂灯效、日志 | v1 只做基础效果和低频状态，禁用高频原始流 | 内存、CPU、串口带宽满足目标 |
 | `R-007` | `P1` | 单位/坐标系不一致 | 双端对角度和姿态解释不同 | 文档冻结定点单位和字段语义，先写协议测试 | 姿态和舵机数据在双端一致 |
@@ -53,4 +53,3 @@
 - 协议真源：`STM32_UART_PROTOCOL.md`
 - TDD 节奏：`TDD_EXECUTION_PLAN.md`
 - HIL 联调：`HIL_TEST_PLAN.md`
-
