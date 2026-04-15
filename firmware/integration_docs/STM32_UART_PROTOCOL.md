@@ -122,6 +122,13 @@ v1 固定约束：
 - `FINAL`
   - 当前帧是一个执行流程的最终结果，例如 `MOTION_DONE` 或 `LED_DONE`
 
+v1 约束：
+
+- `ACK` / `NACK` 必须带 `RESP`
+- `HELLO_RSP` / `SNAPSHOT_RSP` 必须带 `RESP`
+- `MOTION_DONE` / `LED_DONE` 必须带 `FINAL`
+- `FAULT` 如果对应某个具体命令，必须同时带 `RESP | FINAL`
+
 ### 5.3 定点单位
 
 v1 单位冻结为：
@@ -262,6 +269,9 @@ v1 中 `status_code = 0` 表示 accepted。
 
 字段语义：
 
+- `ref_seq`
+  - 对应触发本次故障的原命令序号
+  - 若故障不对应某个具体命令，例如链路级或后台健康检查故障，则固定为 `0`
 - `fault_source`
 - `fault_code`
 - `detail`
@@ -476,6 +486,18 @@ v1 默认速率冻结为：
 - `DONE` / `FAULT` 表示“执行结果”
 
 禁止把“执行完成”折叠进同步 ACK。
+
+请求-应答合同冻结为：
+
+- `HELLO_REQ`
+  - 成功路径：必须先收到 `ACK`，随后再收到 `HELLO_RSP`
+  - 失败路径：收到 `NACK` 后，本轮握手结束，不再等待 `HELLO_RSP`
+- `SNAPSHOT_REQ`
+  - 成功路径：必须先收到 `ACK`，随后再收到 `SNAPSHOT_RSP`
+  - 失败路径：收到 `NACK` 后，本轮快照请求结束，不再等待 `SNAPSHOT_RSP`
+- 对于所有设置了 `ACK_REQ` 的控制命令：
+  - `ACK` / `NACK` 只表示接收与受理结果
+  - 后续的 `DONE` / `FAULT` 才表示执行结果
 
 ### 9.2 超时
 

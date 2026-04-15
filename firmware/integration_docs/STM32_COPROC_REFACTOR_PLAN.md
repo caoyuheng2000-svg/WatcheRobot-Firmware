@@ -100,7 +100,7 @@ behavior_state_service   mcu_sensor_service
 - `mcu_link_init()`
   - 初始化 UART、接收缓冲、协议编解码、链路状态机
 - `mcu_link_is_ready()`
-  - 返回协处理器是否已完成握手并可接收业务命令
+  - 返回协处理器是否已完成握手、基线同步并可接收业务命令
 - `mcu_motion_submit(...)`
   - 提交舵机动作命令，不等待执行完成
 - `mcu_motion_stop(...)`
@@ -115,6 +115,9 @@ behavior_state_service   mcu_sensor_service
 - `control_ingress` 继续作为 BLE / WS / 上层业务的统一入口
 - `hal_servo_*` 保留为兼容层，但内部只做参数校验、限幅和转发，不再直接做本地 PWM
 - `behavior_state_service` 继续保留现有动作资源模型，但向下只提交“目标角度 + 时长”，不再直接假设本地硬件立即可达
+- ESP32 内部需要区分 `coprocessor_link_ready` 与 `coprocessor_ready`
+  - `coprocessor_link_ready` 表示握手完成、协议版本和能力位校验通过
+  - `coprocessor_ready` 表示基线同步和恢复流程完成，可以放行业务命令
 
 ### 4.2 STM32 侧职责边界
 
@@ -148,12 +151,13 @@ STM32 明确不负责：
 2. `mcu_link_service` 初始化 UART 与收发缓冲
 3. ESP32 发起握手请求
 4. STM32 返回版本、能力位与传感器位图
-5. ESP32 标记 `coprocessor_ready`
-6. ESP32 下发默认配置与基线状态
-   - 传感器默认上报配置
-   - 舵机基线状态
-   - LED 基线状态
-7. 业务层开始允许动作与灯效命令
+5. ESP32 标记 `coprocessor_link_ready`
+6. ESP32 执行基线同步与恢复
+   - 若支持 `snapshot`，先发 `SNAPSHOT_REQ` 并恢复当前舵机位置、LED 模式与传感器健康位
+   - 传感器流配置在 v1 中不单独下发命令，直接采用 `HELLO_RSP.default_stream_profile`
+   - ESP32 只在本地缓存与 STM32 快照不一致时补发舵机/LED 基线状态
+7. ESP32 标记 `coprocessor_ready`
+8. 业务层开始允许动作与灯效命令
 
 ### 5.2 恢复流程
 
@@ -163,7 +167,7 @@ STM32 明确不负责：
 - 拒绝新的舵机与 LED 控制命令
 - 保留 UI、BLE、WS、云连接可用
 - 自动重试链路恢复
-- 链路恢复后重新走一轮握手与默认配置下发
+- 链路恢复后重新走一轮握手、快照恢复与基线同步
 
 ### 5.3 降级口径
 
