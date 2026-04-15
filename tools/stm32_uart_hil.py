@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Minimal STM32 UART HIL runner scaffold.
 
-This script is intentionally lightweight and self-contained. It defines the
-scenario names, result schema, and placeholder transport hooks needed for later
-serial-port integration.
+The script stays self-contained and supports two execution modes:
+
+- `mock`: deterministic offline execution with capability-gated scenarios
+- `serial`: optional placeholder transport for later real hardware wiring
+
+The JSON output is intentionally aligned with the integration docs: the core
+top-level fields are the documented scenario/result/metric/notes entries, while
+auxiliary metadata is grouped under `scenario_metadata`.
 """
 
 from __future__ import annotations
@@ -12,24 +17,171 @@ import argparse
 import json
 import sys
 import time
-from dataclasses import dataclass, asdict
-from pathlib import Path
+from dataclasses import dataclass, field, asdict
 from typing import Iterable, Optional, Protocol
 
 
-SCENARIOS = (
-    "hello_heartbeat_smoke",
-    "servo_move_ack_done",
-    "servo_stop_interrupt",
-    "led_effect_ack_done",
-    "touch_press_release",
-    "mag_state_rate_2hz",
-    "imu_state_rate_20hz",
-    "coproc_reset_recovery",
-    "snapshot_restore",
-    "baseline_restore_without_snapshot",
-    "crc_fault_injection",
-)
+SCHEMA_VERSION = "v1"
+DEFAULT_STREAM_PROFILE = "v1_default"
+SNAPSHOT_REQUIRED = "required"
+SNAPSHOT_FORBIDDEN = "forbidden"
+SNAPSHOT_OPTIONAL = "optional"
+
+RESULT_PASSED = "passed"
+RESULT_SKIPPED = "skipped"
+RESULT_TIMEOUT = "timeout"
+RESULT_FAILED = "failed"
+
+
+@dataclass(slots=True)
+class ScenarioStep:
+    """One deterministic transcript entry in a named scenario."""
+
+    action: str
+    message: str
+    metric_deltas: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ScenarioSpec:
+    """Capability-gated scenario metadata."""
+
+    name: str
+    snapshot_gate: str
+    duration_ms: int
+    steps: tuple[ScenarioStep, ...]
+    description: str
+
+
+SCENARIO_SPECS: dict[str, ScenarioSpec] = {
+    "hello_heartbeat_smoke": ScenarioSpec(
+        name="hello_heartbeat_smoke",
+        snapshot_gate=SNAPSHOT_OPTIONAL,
+        duration_ms=120,
+        description="Verify handshake, capability discovery, and heartbeat",
+        steps=(
+            ScenarioStep("send", "HELLO_REQ"),
+            ScenarioStep("inject", "HELLO_RSP snapshot_capability=1"),
+            ScenarioStep("inject", "HEARTBEAT"),
+        ),
+    ),
+    "servo_move_ack_done": ScenarioSpec(
+        name="servo_move_ack_done",
+        snapshot_gate=SNAPSHOT_OPTIONAL,
+        duration_ms=140,
+        description="Verify motion accepted and completed",
+        steps=(
+            ScenarioStep("send", "SERVO_MOVE"),
+            ScenarioStep("inject", "ACK status=accepted"),
+            ScenarioStep("inject", "MOTION_DONE result=success"),
+        ),
+    ),
+    "servo_stop_interrupt": ScenarioSpec(
+        name="servo_stop_interrupt",
+        snapshot_gate=SNAPSHOT_OPTIONAL,
+        duration_ms=160,
+        description="Verify stop interrupts motion and surfaces a non-success completion",
+        steps=(
+            ScenarioStep("send", "SERVO_MOVE"),
+            ScenarioStep("inject", "ACK status=accepted"),
+            ScenarioStep("send", "SERVO_STOP"),
+            ScenarioStep("inject", "MOTION_DONE result=interrupted", {"motion_done_fault_count": 1}),
+        ),
+    ),
+    "led_effect_ack_done": ScenarioSpec(
+        name="led_effect_ack_done",
+        snapshot_gate=SNAPSHOT_OPTIONAL,
+        duration_ms=110,
+        description="Verify LED effect accepted and completed",
+        steps=(
+            ScenarioStep("send", "LED_SET_EFFECT"),
+            ScenarioStep("inject", "ACK status=accepted"),
+            ScenarioStep("inject", "LED_DONE result=success"),
+        ),
+    ),
+    "touch_press_release": ScenarioSpec(
+        name="touch_press_release",
+        snapshot_gate=SNAPSHOT_OPTIONAL,
+        duration_ms=70,
+        description="Verify touch edge events are observed in order",
+        steps=(
+            ScenarioStep("inject", "TOUCH_EVENT event=press"),
+            ScenarioStep("inject", "TOUCH_EVENT event=release"),
+        ),
+    ),
+    "mag_state_rate_2hz": ScenarioSpec(
+        name="mag_state_rate_2hz",
+        snapshot_gate=SNAPSHOT_OPTIONAL,
+        duration_ms=90,
+        description="Verify magnetometer state stays within the low-rate cadence",
+        steps=(
+            ScenarioStep("inject", "MAG_STATE sample=0"),
+            ScenarioStep("inject", "MAG_STATE sample=1"),
+        ),
+    ),
+    "imu_state_rate_20hz": ScenarioSpec(
+        name="imu_state_rate_20hz",
+        snapshot_gate=SNAPSHOT_OPTIONAL,
+        duration_ms=130,
+        description="Verify IMU state uses latest-state-wins under burst load",
+        steps=(
+            ScenarioStep("inject", "IMU_STATE burst=20hz"),
+            ScenarioStep(
+                "inject",
+                "IMU_STATE collapse=latest",
+                {"dropped_state_count": 4},
+            ),
+        ),
+    ),
+    "coproc_reset_recovery": ScenarioSpec(
+        name="coproc_reset_recovery",
+        snapshot_gate=SNAPSHOT_OPTIONAL,
+        duration_ms=180,
+        description="Verify reset recovery and reconnect accounting",
+        steps=(
+            ScenarioStep("send", "HELLO_REQ"),
+            ScenarioStep("inject", "HELLO_RSP snapshot_capability=1"),
+            ScenarioStep("inject", "HEARTBEAT after_reset"),
+            ScenarioStep("inject", "RECOVERY complete", {"reconnect_count": 1}),
+        ),
+    ),
+    "snapshot_restore": ScenarioSpec(
+        name="snapshot_restore",
+        snapshot_gate=SNAPSHOT_REQUIRED,
+        duration_ms=150,
+        description="Verify restore via runtime snapshot",
+        steps=(
+            ScenarioStep("send", "HELLO_REQ"),
+            ScenarioStep("inject", "HELLO_RSP snapshot_capability=1"),
+            ScenarioStep("send", "SNAPSHOT_REQ"),
+            ScenarioStep("inject", "SNAPSHOT_RSP"),
+            ScenarioStep("inject", "BASELINE restored", {"reconnect_count": 1}),
+        ),
+    ),
+    "baseline_restore_without_snapshot": ScenarioSpec(
+        name="baseline_restore_without_snapshot",
+        snapshot_gate=SNAPSHOT_FORBIDDEN,
+        duration_ms=100,
+        description="Verify recovery path that uses safe defaults without snapshot",
+        steps=(
+            ScenarioStep("send", "HELLO_REQ"),
+            ScenarioStep("inject", "HELLO_RSP snapshot_capability=0"),
+            ScenarioStep("inject", "BASELINE restored from safe defaults", {"reconnect_count": 1}),
+        ),
+    ),
+    "crc_fault_injection": ScenarioSpec(
+        name="crc_fault_injection",
+        snapshot_gate=SNAPSHOT_OPTIONAL,
+        duration_ms=60,
+        description="Verify bad CRC frames are dropped and counted",
+        steps=(
+            ScenarioStep("inject", "BAD_FRAME crc=invalid", {"crc_error_count": 1, "dropped_state_count": 1}),
+            ScenarioStep("inject", "GOOD_FRAME resync"),
+        ),
+    ),
+}
+
+SCENARIOS = tuple(SCENARIO_SPECS)
 
 
 @dataclass(slots=True)
@@ -40,21 +192,39 @@ class HILMetrics:
     reconnect_count: int = 0
     motion_done_fault_count: int = 0
 
+    def apply(self, deltas: dict[str, int]) -> None:
+        for name, delta in deltas.items():
+            if not hasattr(self, name):
+                raise KeyError(f"unknown metric {name!r}")
+            setattr(self, name, getattr(self, name) + delta)
+
 
 @dataclass(slots=True)
 class HILResult:
+    schema_version: str
     scenario: str
     result: str
-    transport: str
-    started_at: float
-    finished_at: float
-    duration_ms: int
+    scenario_metadata: dict[str, object]
     metrics: HILMetrics
     notes: list[str]
 
+    @property
+    def ok(self) -> bool:
+        return self.result in {RESULT_PASSED, RESULT_SKIPPED}
+
     def to_json(self) -> dict:
-        payload = asdict(self)
-        payload["metrics"] = asdict(self.metrics)
+        payload = {
+            "schema_version": self.schema_version,
+            "scenario": self.scenario,
+            "result": self.result,
+            "scenario_metadata": self.scenario_metadata,
+            "ack_timeout_count": self.metrics.ack_timeout_count,
+            "crc_error_count": self.metrics.crc_error_count,
+            "dropped_state_count": self.metrics.dropped_state_count,
+            "reconnect_count": self.metrics.reconnect_count,
+            "motion_done_fault_count": self.metrics.motion_done_fault_count,
+            "notes": self.notes,
+        }
         return payload
 
 
@@ -73,7 +243,7 @@ class Transport(Protocol):
 
 
 class MockTransport:
-    """Queue-based transport used for tests and offline scenario scaffolding."""
+    """Queue-based transport used for deterministic offline scenario scaffolding."""
 
     name = "mock"
 
@@ -81,17 +251,21 @@ class MockTransport:
         self._rx = bytearray()
         self._tx = bytearray()
         self._is_open = False
+        self.events: list[str] = []
 
     def open(self) -> None:
         self._is_open = True
+        self.events.append("open")
 
     def close(self) -> None:
         self._is_open = False
+        self.events.append("close")
 
     def write(self, data: bytes) -> int:
         if not self._is_open:
             raise RuntimeError("transport is not open")
         self._tx.extend(data)
+        self.events.append(f"tx:{data.decode('utf-8', errors='replace')}")
         return len(data)
 
     def read(self, size: int = 4096, timeout: float = 0.0) -> bytes:
@@ -103,10 +277,12 @@ class MockTransport:
             return b""
         chunk = bytes(self._rx[:size])
         del self._rx[:size]
+        self.events.append(f"rx:{chunk.decode('utf-8', errors='replace')}")
         return chunk
 
     def inject_rx(self, data: bytes) -> None:
         self._rx.extend(data)
+        self.events.append(f"inject:{data.decode('utf-8', errors='replace')}")
 
 
 class SerialTransport:
@@ -180,6 +356,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--port", help="Serial port for --transport serial, e.g. COM7")
     parser.add_argument("--baud", type=int, default=921600, help="Serial baud rate")
+    parser.add_argument(
+        "--snapshot-capability",
+        choices=("auto", "yes", "no"),
+        default="auto",
+        help="Override the scenario's snapshot capability gate",
+    )
     parser.add_argument("--timeout", type=float, default=2.0, help="Scenario timeout in seconds")
     parser.add_argument(
         "--json-indent",
@@ -198,67 +380,119 @@ def _make_transport(args: argparse.Namespace) -> Transport:
     return MockTransport()
 
 
-def _scenario_steps(scenario: str) -> list[str]:
-    steps = {
-        "hello_heartbeat_smoke": ["send HELLO_REQ", "expect HELLO_RSP", "expect HEARTBEAT"],
-        "servo_move_ack_done": ["send SERVO_MOVE", "expect ACK", "expect MOTION_DONE"],
-        "servo_stop_interrupt": ["send SERVO_MOVE", "send SERVO_STOP", "expect MOTION_DONE interrupted"],
-        "led_effect_ack_done": ["send LED_SET_EFFECT", "expect ACK", "expect LED_DONE"],
-        "touch_press_release": ["inject TOUCH_EVENT press", "inject TOUCH_EVENT release"],
-        "mag_state_rate_2hz": ["inject MAG_STATE at 2Hz", "verify latest-state-wins"],
-        "imu_state_rate_20hz": ["inject IMU_STATE bursts", "verify rate limiting"],
-        "coproc_reset_recovery": ["simulate reset", "re-handshake", "restore baseline"],
-        "snapshot_restore": ["send SNAPSHOT_REQ", "expect SNAPSHOT_RSP", "restore baseline from snapshot"],
-        "baseline_restore_without_snapshot": [
-            "simulate recovery without snapshot capability",
-            "restore baseline from local safe defaults",
-        ],
-        "crc_fault_injection": ["inject bad CRC frame", "expect frame drop", "recover on next frame"],
-    }
-    return list(steps.get(scenario, []))
+def _resolve_snapshot_capability(spec: ScenarioSpec, requested: str) -> bool:
+    if requested == "auto":
+        return spec.snapshot_gate != SNAPSHOT_FORBIDDEN
+    if requested == "yes":
+        return True
+    return False
 
 
-def _run_scenario(scenario: str, transport: Transport, timeout: float) -> HILResult:
-    started = time.time()
+def _snapshot_gate_satisfied(spec: ScenarioSpec, selected: bool) -> bool:
+    if spec.snapshot_gate == SNAPSHOT_REQUIRED:
+        return selected
+    if spec.snapshot_gate == SNAPSHOT_FORBIDDEN:
+        return not selected
+    return True
+
+
+def _scenario_transcript(spec: ScenarioSpec) -> list[dict[str, str]]:
+    return [{"action": step.action, "message": step.message} for step in spec.steps]
+
+
+def _apply_step_to_mock_transport(transport: Transport, step: ScenarioStep) -> None:
+    if not isinstance(transport, MockTransport):
+        return
+    payload = step.message.encode("utf-8")
+    if step.action == "send":
+        transport.write(payload)
+    elif step.action == "inject":
+        transport.inject_rx(payload)
+    elif step.action == "expect":
+        transport.read(size=len(payload) or 1, timeout=0.0)
+
+
+def _run_scenario(scenario: str, transport: Transport, timeout: float, snapshot_capability: str) -> HILResult:
+    spec = SCENARIO_SPECS[scenario]
+    selected_snapshot_capability = _resolve_snapshot_capability(spec, snapshot_capability)
+    transcript = _scenario_transcript(spec)
+    notes = [step.message for step in spec.steps]
+    notes.append(
+        f"snapshot_capability={'yes' if selected_snapshot_capability else 'no'} gate={spec.snapshot_gate}"
+    )
+
     metrics = HILMetrics()
-    notes: list[str] = []
+    scenario_metadata = {
+        "capability_gate": {"snapshot": spec.snapshot_gate},
+        "snapshot_capability": selected_snapshot_capability,
+        "default_stream_profile": DEFAULT_STREAM_PROFILE,
+        "description": spec.description,
+        "transport": transport.name,
+        "simulated_duration_ms": spec.duration_ms,
+        "transcript": transcript,
+    }
 
-    transport.open()
     try:
-        for step in _scenario_steps(scenario):
-            notes.append(step)
+        transport.open()
+    except Exception as exc:
+        notes.append(f"transport open failed: {exc}")
+        scenario_metadata["result_reason"] = "transport_open_failed"
+        return HILResult(
+            schema_version=SCHEMA_VERSION,
+            scenario=scenario,
+            result=RESULT_FAILED,
+            scenario_metadata=scenario_metadata,
+            metrics=metrics,
+            notes=notes,
+        )
 
-        # Placeholder for later hardware integration:
-        # - serialize request frames
-        # - inject or read UART bytes
-        # - update counters from decoded ACK/DONE/FAULT/status messages
-        if scenario == "crc_fault_injection":
-            metrics.crc_error_count += 1
-        elif scenario == "servo_move_ack_done":
-            metrics.motion_done_fault_count += 0
-        elif scenario == "coproc_reset_recovery":
-            metrics.reconnect_count += 1
+    result = RESULT_PASSED
+    try:
+        if not _snapshot_gate_satisfied(spec, selected_snapshot_capability):
+            result = RESULT_SKIPPED
+            notes.append("scenario skipped because snapshot capability gate is not satisfied")
+            scenario_metadata["result_reason"] = "capability_gate_not_satisfied"
+            return HILResult(
+                schema_version=SCHEMA_VERSION,
+                scenario=scenario,
+                result=result,
+                scenario_metadata=scenario_metadata,
+                metrics=metrics,
+                notes=notes,
+            )
 
-        elapsed = max(time.time() - started, 0.0)
-        if elapsed > timeout:
-            metrics.ack_timeout_count += 1
-            result = "timeout"
-        else:
-            result = "passed"
+        simulated_timeout_ms = int(timeout * 1000)
+        if spec.duration_ms > simulated_timeout_ms:
+            result = RESULT_TIMEOUT
+            notes.append(
+                f"scenario timed out after {simulated_timeout_ms} ms budget before deterministic completion"
+            )
+            scenario_metadata["result_reason"] = "timeout"
+            return HILResult(
+                schema_version=SCHEMA_VERSION,
+                scenario=scenario,
+                result=result,
+                scenario_metadata=scenario_metadata,
+                metrics=metrics,
+                notes=notes,
+            )
+
+        for step in spec.steps:
+            _apply_step_to_mock_transport(transport, step)
+            for metric_name, delta in step.metric_deltas.items():
+                metrics.apply({metric_name: delta})
+
+        scenario_metadata["result_reason"] = "completed"
+        return HILResult(
+            schema_version=SCHEMA_VERSION,
+            scenario=scenario,
+            result=result,
+            scenario_metadata=scenario_metadata,
+            metrics=metrics,
+            notes=notes,
+        )
     finally:
         transport.close()
-
-    finished = time.time()
-    return HILResult(
-        scenario=scenario,
-        result=result,
-        transport=transport.name,
-        started_at=started,
-        finished_at=finished,
-        duration_ms=int((finished - started) * 1000),
-        metrics=metrics,
-        notes=notes,
-    )
 
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
@@ -266,7 +500,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     transport = _make_transport(args)
-    result = _run_scenario(args.scenario, transport, args.timeout)
+    result = _run_scenario(args.scenario, transport, args.timeout, args.snapshot_capability)
 
     indent = None if args.json_indent == 0 else args.json_indent
     json.dump(result.to_json(), sys.stdout, indent=indent, sort_keys=True)
