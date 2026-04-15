@@ -8,11 +8,13 @@
 
 1. [STM32_COPROC_REFACTOR_PLAN.md](./STM32_COPROC_REFACTOR_PLAN.md)
 2. [STM32_UART_PROTOCOL.md](./STM32_UART_PROTOCOL.md)
-3. [TDD_EXECUTION_PLAN.md](./TDD_EXECUTION_PLAN.md)
-4. [RISK_REGISTER.md](./RISK_REGISTER.md)
-5. [HIL_TEST_PLAN.md](./HIL_TEST_PLAN.md)
-6. [BRANCH_WORKTREE_PLAN.md](./BRANCH_WORKTREE_PLAN.md)
-7. [adr/](./adr)
+3. [IMPLEMENTATION_STATUS.md](./IMPLEMENTATION_STATUS.md)
+4. [IMPLEMENTATION_TODO.md](./IMPLEMENTATION_TODO.md)
+5. [TDD_EXECUTION_PLAN.md](./TDD_EXECUTION_PLAN.md)
+6. [RISK_REGISTER.md](./RISK_REGISTER.md)
+7. [HIL_TEST_PLAN.md](./HIL_TEST_PLAN.md)
+8. [BRANCH_WORKTREE_PLAN.md](./BRANCH_WORKTREE_PLAN.md)
+9. [adr/](./adr)
 
 ## 2. 文档职责
 
@@ -25,6 +27,10 @@
 
 ### 2.2 执行文档
 
+- [IMPLEMENTATION_STATUS.md](./IMPLEMENTATION_STATUS.md)
+  - 当前集成分支已经落到哪一步、哪些检查已经通过
+- [IMPLEMENTATION_TODO.md](./IMPLEMENTATION_TODO.md)
+  - 已冻结但尚未实施的下一阶段待办
 - [TDD_EXECUTION_PLAN.md](./TDD_EXECUTION_PLAN.md)
   - 测试驱动实施节奏、阶段出口和测试文件落点
 - [HIL_TEST_PLAN.md](./HIL_TEST_PLAN.md)
@@ -59,6 +65,7 @@
 
 - STM32 协处理器总体架构
 - ESP32 <-> STM32 UART 协议
+- 当前实现进度与下一阶段待办
 - TDD 执行节奏
 - 风险清单
 - HIL 联调计划
@@ -71,9 +78,18 @@
 - 上位机 GUI 工具
 - 对外 BLE / WS 协议改版
 
-## 5. 相关参考
+## 5. 当前实现里程碑
+
+截至 `2026-04-15`，`v2.0.0-refactor` 已落到以下检查点：
+
+- 文档真源、TDD 计划、风险清单、HIL 计划均已冻结
+- ESP32 侧 `mcu_link` 已有协议骨架、UART scaffold 和 `HELLO_REQ` bootstrap 发送路径
+- `mcu_motion_service` 已能在 `mcu_link` 进入 `link_ready` 时镜像下发 `SERVO_MOVE / SERVO_STOP`
+- 当前板级验证仍保留本地 `hal_servo` PWM 后端，`GPIO19/20` 尚未切换为运行时 UART
+- 本地自动化检查与 `COM28` 板级 smoke 已通过，详见 [IMPLEMENTATION_STATUS.md](./IMPLEMENTATION_STATUS.md)
+
+## 6. 相关参考
 
 - 当前外部协议基线：`../s3/docs/COMM_PROTOCOL_FREEZE.md`
 - 当前 BLE 桥接语义：`../s3/docs/BLE_GATT_PROTOCOL_BRIDGE.md`
 - 当前相机协处理器设计经验：`../s3/docs/COPROC_COMM_DEV_DESIGN.md`
-
