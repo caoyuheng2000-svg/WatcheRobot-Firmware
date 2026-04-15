@@ -723,6 +723,8 @@ static void ws_reset_session_state(void) {
 
 static void ws_resume_wake_word_after_tts(void) {
 #ifdef CONFIG_ENABLE_WAKE_WORD
+    hal_audio_set_playback_mode(false);
+    hal_audio_set_sample_rate(16000);
     hal_audio_start();
     voice_recorder_resume_wake_word();
 #endif
@@ -774,9 +776,8 @@ static void ws_abort_tts_playback(void) {
         return;
     }
 
-    hal_audio_stop();
     hal_audio_set_playback_mode(false);
-    hal_audio_set_sample_rate(16000);
+    hal_audio_stop();
     s_tts_playing = false;
     sfx_service_set_cloud_audio_busy(false);
     ws_resume_wake_word_after_tts();
@@ -788,10 +789,9 @@ static void ws_finish_tts_playback(void) {
     if (s_tts_playing) {
         ESP_LOGI(TAG, "TTS playback complete");
         vTaskDelay(pdMS_TO_TICKS(500));
-        hal_audio_stop();
         hal_audio_set_playback_mode(false);
+        hal_audio_stop();
         vTaskDelay(pdMS_TO_TICKS(1000));
-        hal_audio_set_sample_rate(16000);
         behavior_state_set("happy");
         s_tts_playing = false;
     }
