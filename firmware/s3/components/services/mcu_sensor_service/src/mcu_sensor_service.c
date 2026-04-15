@@ -14,6 +14,36 @@ esp_err_t mcu_sensor_service_init(void)
     return ESP_OK;
 }
 
+esp_err_t mcu_sensor_service_update_touch(const mcu_touch_state_t *state)
+{
+    if (state == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_touch_state = *state;
+    return ESP_OK;
+}
+
+esp_err_t mcu_sensor_service_update_mag(const mcu_mag_state_t *state)
+{
+    if (state == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_mag_state = *state;
+    return ESP_OK;
+}
+
+esp_err_t mcu_sensor_service_update_imu(const mcu_imu_state_t *state)
+{
+    if (state == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_imu_state = *state;
+    return ESP_OK;
+}
+
 esp_err_t mcu_sensor_service_get_latest_touch(mcu_touch_state_t *out_state)
 {
     if (out_state == NULL) {

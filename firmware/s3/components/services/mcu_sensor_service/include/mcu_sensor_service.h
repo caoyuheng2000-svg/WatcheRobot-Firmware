@@ -34,6 +34,9 @@ typedef struct {
 } mcu_imu_state_t;
 
 esp_err_t mcu_sensor_service_init(void);
+esp_err_t mcu_sensor_service_update_touch(const mcu_touch_state_t *state);
+esp_err_t mcu_sensor_service_update_mag(const mcu_mag_state_t *state);
+esp_err_t mcu_sensor_service_update_imu(const mcu_imu_state_t *state);
 esp_err_t mcu_sensor_service_get_latest_touch(mcu_touch_state_t *out_state);
 esp_err_t mcu_sensor_service_get_latest_mag(mcu_mag_state_t *out_state);
 esp_err_t mcu_sensor_service_get_latest_imu(mcu_imu_state_t *out_state);

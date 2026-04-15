@@ -15,11 +15,21 @@ typedef enum {
     MCU_LED_MODE_EFFECT = 2,
 } mcu_led_mode_t;
 
+typedef enum {
+    MCU_LED_EFFECT_BLINK = 1,
+    MCU_LED_EFFECT_BREATHING = 2,
+    MCU_LED_EFFECT_RAINBOW = 3,
+    MCU_LED_EFFECT_STATUS_PULSE = 4,
+} mcu_led_effect_t;
+
 typedef struct {
     mcu_led_mode_t mode;
-    uint8_t red;
-    uint8_t green;
-    uint8_t blue;
+    uint8_t primary_red;
+    uint8_t primary_green;
+    uint8_t primary_blue;
+    uint8_t secondary_red;
+    uint8_t secondary_green;
+    uint8_t secondary_blue;
     uint8_t brightness;
     uint8_t effect_id;
     uint16_t period_ms;
@@ -28,6 +38,7 @@ typedef struct {
 
 esp_err_t mcu_led_service_init(void);
 esp_err_t mcu_led_submit(const mcu_led_request_t *request);
+esp_err_t mcu_led_service_get_last_request(mcu_led_request_t *out_request);
 
 #ifdef __cplusplus
 }
