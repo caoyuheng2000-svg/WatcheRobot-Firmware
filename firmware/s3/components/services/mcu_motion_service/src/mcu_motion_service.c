@@ -1,10 +1,98 @@
 #include "mcu_motion_service.h"
 
+#include "esp_log.h"
+#include "mcu_link_bootstrap.h"
+
 #include <stdbool.h>
 #include <string.h>
 
+static const char *TAG = "MCU_MOTION";
+
 static mcu_motion_request_t s_last_request;
 static bool s_has_last_request;
+
+static void encode_u16_le(uint8_t *dst, uint16_t value)
+{
+    dst[0] = (uint8_t)(value & 0xFFu);
+    dst[1] = (uint8_t)((value >> 8) & 0xFFu);
+}
+
+static void encode_i16_le(uint8_t *dst, int16_t value)
+{
+    encode_u16_le(dst, (uint16_t)value);
+}
+
+static esp_err_t mcu_motion_submit_runtime_frame(const mcu_motion_request_t *request)
+{
+    uint8_t payload[9];
+    mcu_link_t *link;
+    uint32_t seq = 0u;
+    size_t wire_len = 0u;
+    esp_err_t ret;
+
+    if (request == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    link = mcu_link_bootstrap_get_link();
+    if (link == NULL) {
+        return ESP_OK;
+    }
+
+    if (!mcu_link_bootstrap_is_link_ready()) {
+        ESP_LOGD(TAG, "MCU link not ready; caching motion request only");
+        return ESP_OK;
+    }
+
+    payload[0] = request->axis_mask;
+    encode_i16_le(&payload[1], request->x_deg_x10);
+    encode_i16_le(&payload[3], request->y_deg_x10);
+    encode_u16_le(&payload[5], request->duration_ms);
+    payload[7] = request->motion_profile;
+    payload[8] = (uint8_t)request->source;
+
+    ret = mcu_link_send_frame(link, MCU_FRAME_CLASS_MOTION, MCU_MOTION_MSG_SERVO_MOVE, MCU_FRAME_FLAG_ACK_REQ,
+                              payload, (uint16_t)sizeof(payload), &seq, &wire_len);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to queue SERVO_MOVE frame: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "Queued SERVO_MOVE frame seq=%lu wire_len=%u axis_mask=0x%02x duration_ms=%u",
+             (unsigned long)seq, (unsigned)wire_len, request->axis_mask, (unsigned)request->duration_ms);
+    return ESP_OK;
+}
+
+static esp_err_t mcu_motion_submit_stop_frame(mcu_motion_source_t source)
+{
+    uint8_t payload[1];
+    mcu_link_t *link;
+    uint32_t seq = 0u;
+    size_t wire_len = 0u;
+    esp_err_t ret;
+
+    link = mcu_link_bootstrap_get_link();
+    if (link == NULL) {
+        return ESP_OK;
+    }
+
+    if (!mcu_link_bootstrap_is_link_ready()) {
+        ESP_LOGD(TAG, "MCU link not ready; stop request not mirrored");
+        return ESP_OK;
+    }
+
+    payload[0] = (uint8_t)source;
+    ret = mcu_link_send_frame(link, MCU_FRAME_CLASS_MOTION, MCU_MOTION_MSG_SERVO_STOP, MCU_FRAME_FLAG_ACK_REQ,
+                              payload, (uint16_t)sizeof(payload), &seq, &wire_len);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to queue SERVO_STOP frame: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "Queued SERVO_STOP frame seq=%lu wire_len=%u source=%u", (unsigned long)seq, (unsigned)wire_len,
+             (unsigned)source);
+    return ESP_OK;
+}
 
 static bool mcu_motion_request_is_valid(const mcu_motion_request_t *request)
 {
@@ -50,7 +138,7 @@ esp_err_t mcu_motion_submit(const mcu_motion_request_t *request)
 
     s_last_request = *request;
     s_has_last_request = true;
-    return ESP_OK;
+    return mcu_motion_submit_runtime_frame(request);
 }
 
 esp_err_t mcu_motion_service_get_last_request(mcu_motion_request_t *out_request)
@@ -73,5 +161,5 @@ esp_err_t mcu_motion_stop(mcu_motion_source_t source)
         return ESP_ERR_INVALID_ARG;
     }
 
-    return ESP_OK;
+    return mcu_motion_submit_stop_frame(source);
 }
