@@ -14,6 +14,7 @@ idf_component_register(
         ws_client
         discovery
         ble_service
+        mcu_link
         # Services
         voice_service
         behavior_state_service

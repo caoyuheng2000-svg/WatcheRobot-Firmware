@@ -7,5 +7,6 @@ idf_component_register(
         "src/mcu_link_fsm.c"
         "src/mcu_link_stats.c"
         "src/mcu_link.c"
+        "src/mcu_link_bootstrap.c"
     INCLUDE_DIRS "include"
 )
