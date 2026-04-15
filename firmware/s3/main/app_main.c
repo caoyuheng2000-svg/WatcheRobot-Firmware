@@ -24,6 +24,7 @@
 #include "hal_servo.h"
 #include "mem_monitor.h"
 #include "ota_service.h"
+#include "mcu_link_bootstrap.h"
 #include "sensecap-watcher.h"
 #include "voice_service.h"
 #include "wifi_manager.h"
@@ -509,6 +510,21 @@ static void init_runtime_inputs_and_restart_path(void) {
     } else {
         ESP_LOGW(TAG, "Skipping %d-click restart callback because knob input is unavailable", RESTART_CLICK_COUNT);
     }
+}
+
+static void init_mcu_link_bootstrap(void) {
+    esp_err_t ret;
+    mcu_link_t *link;
+
+    ret = mcu_link_bootstrap_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "MCU link bootstrap init failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    link = mcu_link_bootstrap_get_link();
+    ESP_LOGI(TAG, "MCU link scaffold ready (present=%d link_ready=%d ready=%d)",
+             link != NULL ? 1 : 0, mcu_link_bootstrap_is_link_ready() ? 1 : 0, mcu_link_bootstrap_is_ready() ? 1 : 0);
 }
 
 // static void run_camera_boot_diag(void) {
@@ -1330,6 +1346,9 @@ void app_main(void) {
         boot_halt_with_error("Control init failed");
     }
     LOG_HEAP_STATE("after_control_ingress");
+
+    /* 5.25 Coprocessor protocol scaffold (no UART wiring yet). */
+    init_mcu_link_bootstrap();
 
     /* 5.5 BLE control + provisioning */
     boot_anim_set_progress(35);
