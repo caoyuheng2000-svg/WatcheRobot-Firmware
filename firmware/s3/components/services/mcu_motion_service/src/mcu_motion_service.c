@@ -1,5 +1,6 @@
 #include "mcu_motion_service.h"
 
+#include <stdbool.h>
 #include <string.h>
 
 static mcu_motion_request_t s_last_request;

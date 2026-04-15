@@ -1,5 +1,7 @@
 #include "mcu_led_service.h"
 
+#include <stdbool.h>
+
 static mcu_led_request_t s_last_request;
 static bool s_has_last_request;
 

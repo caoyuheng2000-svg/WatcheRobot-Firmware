@@ -58,7 +58,11 @@
 #define SERVO_Y_DEFAULT_DEG 120
 
 /* Optional compatibility bridge to the MCU motion service */
-#define SERVO_MOTION_BRIDGE_ENABLED CONFIG_WATCHER_SERVO_USE_MCU_MOTION_BRIDGE
+#ifdef CONFIG_WATCHER_SERVO_USE_MCU_MOTION_BRIDGE
+#define SERVO_MOTION_BRIDGE_ENABLED 1
+#else
+#define SERVO_MOTION_BRIDGE_ENABLED 0
+#endif
 
 /** Synchronized dual-axis move command */
 typedef struct {
