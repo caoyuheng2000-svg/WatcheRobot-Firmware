@@ -3,7 +3,9 @@ idf_component_register(
         "src/mcu_crc16.c"
         "src/mcu_cobs.c"
         "src/mcu_frame.c"
+        "src/mcu_wire.c"
         "src/mcu_link_fsm.c"
+        "src/mcu_link_stats.c"
         "src/mcu_link.c"
     INCLUDE_DIRS "include"
 )
