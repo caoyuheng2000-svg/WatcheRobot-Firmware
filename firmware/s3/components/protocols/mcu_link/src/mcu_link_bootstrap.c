@@ -67,3 +67,34 @@ bool mcu_link_bootstrap_is_ready(void)
 {
     return s_link_initialized && mcu_link_is_ready(&s_link);
 }
+
+esp_err_t mcu_link_bootstrap_start(void)
+{
+    uint32_t seq = 0u;
+    size_t wire_len = 0u;
+    esp_err_t ret;
+
+    if (!s_link_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!mcu_link_uart_is_ready()) {
+        ESP_LOGI(TAG, "MCU link transport disabled; handshake not started");
+        return ESP_OK;
+    }
+
+    ret = mcu_link_send_hello_req(&s_link, &seq, &wire_len);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "MCU link hello request failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "MCU link hello request queued (seq=%lu wire_len=%u state=%d)", (unsigned long)seq,
+             (unsigned)wire_len, (int)mcu_link_get_state(&s_link));
+    return ESP_OK;
+}
+
+mcu_link_state_t mcu_link_bootstrap_get_state(void)
+{
+    return s_link_initialized ? mcu_link_get_state(&s_link) : MCU_LINK_STATE_DOWN;
+}

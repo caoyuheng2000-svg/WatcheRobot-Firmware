@@ -2,6 +2,7 @@
 
 #include "esp_check.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
 #include <string.h>
 
 static const char *TAG = "MCU_LINK_UART";
@@ -71,4 +72,60 @@ bool mcu_link_uart_is_ready(void)
 uart_port_t mcu_link_uart_get_port(void)
 {
     return s_uart.ready ? s_uart.config.port : UART_NUM_MAX;
+}
+
+esp_err_t mcu_link_uart_write(const uint8_t *data, size_t data_len, size_t *out_written)
+{
+    int written;
+
+    ESP_RETURN_ON_FALSE(data != NULL, ESP_ERR_INVALID_ARG, TAG, "missing data");
+    ESP_RETURN_ON_FALSE(data_len > 0u, ESP_ERR_INVALID_ARG, TAG, "empty write");
+    ESP_RETURN_ON_FALSE(s_uart.ready, ESP_ERR_INVALID_STATE, TAG, "uart not ready");
+
+    written = uart_write_bytes(s_uart.config.port, data, data_len);
+    if (written < 0) {
+        ESP_LOGE(TAG, "uart_write_bytes failed");
+        return ESP_FAIL;
+    }
+
+    if (out_written != NULL) {
+        *out_written = (size_t)written;
+    }
+
+    return written == (int)data_len ? ESP_OK : ESP_ERR_INVALID_SIZE;
+}
+
+esp_err_t mcu_link_uart_read(uint8_t *buffer, size_t buffer_len, uint32_t timeout_ms, size_t *out_read)
+{
+    int read_len;
+    TickType_t ticks = pdMS_TO_TICKS(timeout_ms);
+
+    ESP_RETURN_ON_FALSE(buffer != NULL, ESP_ERR_INVALID_ARG, TAG, "missing buffer");
+    ESP_RETURN_ON_FALSE(buffer_len > 0u, ESP_ERR_INVALID_ARG, TAG, "empty read");
+    ESP_RETURN_ON_FALSE(s_uart.ready, ESP_ERR_INVALID_STATE, TAG, "uart not ready");
+
+    read_len = uart_read_bytes(s_uart.config.port, buffer, buffer_len, ticks);
+    if (read_len < 0) {
+        ESP_LOGE(TAG, "uart_read_bytes failed");
+        return ESP_FAIL;
+    }
+
+    if (out_read != NULL) {
+        *out_read = (size_t)read_len;
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t mcu_link_uart_get_buffered_bytes(size_t *out_bytes)
+{
+    size_t buffered = 0u;
+
+    ESP_RETURN_ON_FALSE(out_bytes != NULL, ESP_ERR_INVALID_ARG, TAG, "missing out_bytes");
+    ESP_RETURN_ON_FALSE(s_uart.ready, ESP_ERR_INVALID_STATE, TAG, "uart not ready");
+
+    ESP_RETURN_ON_ERROR(uart_get_buffered_data_len(s_uart.config.port, &buffered), TAG,
+                        "uart_get_buffered_data_len failed");
+    *out_bytes = buffered;
+    return ESP_OK;
 }

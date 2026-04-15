@@ -20,6 +20,7 @@ extern "C" {
 typedef struct {
     mcu_link_fsm_t fsm;
     mcu_link_stats_t stats;
+    uint32_t next_tx_seq;
 } mcu_link_t;
 
 esp_err_t mcu_link_init(mcu_link_t *link);
@@ -39,6 +40,15 @@ esp_err_t mcu_link_record_crc_error(mcu_link_t *link);
 esp_err_t mcu_link_record_reconnect(mcu_link_t *link);
 esp_err_t mcu_link_record_dropped_state(mcu_link_t *link);
 esp_err_t mcu_link_record_motion_done_fault(mcu_link_t *link);
+esp_err_t mcu_link_send_frame(mcu_link_t *link,
+                              uint8_t msg_class,
+                              uint8_t msg_id,
+                              uint8_t flags,
+                              const uint8_t *payload,
+                              uint16_t payload_len,
+                              uint32_t *out_seq,
+                              size_t *out_wire_len);
+esp_err_t mcu_link_send_hello_req(mcu_link_t *link, uint32_t *out_seq, size_t *out_wire_len);
 
 #ifdef __cplusplus
 }

@@ -13,7 +13,9 @@ extern "C" {
 #endif
 
 esp_err_t mcu_link_bootstrap_init(void);
+esp_err_t mcu_link_bootstrap_start(void);
 mcu_link_t *mcu_link_bootstrap_get_link(void);
+mcu_link_state_t mcu_link_bootstrap_get_state(void);
 bool mcu_link_bootstrap_is_link_ready(void);
 bool mcu_link_bootstrap_is_ready(void);
 

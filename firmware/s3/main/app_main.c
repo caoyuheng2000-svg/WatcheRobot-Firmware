@@ -523,8 +523,14 @@ static void init_mcu_link_bootstrap(void) {
     }
 
     link = mcu_link_bootstrap_get_link();
-    ESP_LOGI(TAG, "MCU link scaffold ready (present=%d link_ready=%d ready=%d)",
-             link != NULL ? 1 : 0, mcu_link_bootstrap_is_link_ready() ? 1 : 0, mcu_link_bootstrap_is_ready() ? 1 : 0);
+    ret = mcu_link_bootstrap_start();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "MCU link bootstrap start failed: %s", esp_err_to_name(ret));
+    }
+
+    ESP_LOGI(TAG, "MCU link scaffold ready (present=%d state=%d link_ready=%d ready=%d)",
+             link != NULL ? 1 : 0, (int)mcu_link_bootstrap_get_state(), mcu_link_bootstrap_is_link_ready() ? 1 : 0,
+             mcu_link_bootstrap_is_ready() ? 1 : 0);
 }
 
 // static void run_camera_boot_diag(void) {
