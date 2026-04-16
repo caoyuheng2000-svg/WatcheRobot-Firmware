@@ -9,6 +9,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- ESP32 boot now fails fast when `hal_servo_init()` cannot bring up the servo facade, instead of continuing into runtime with behavior/control paths active but no working motion backend
+- The MCU coprocessor runtime path now continuously services inbound UART frames after boot, so `HELLO_RSP / ACK / NACK / FAULT` no longer stall after the initial `HELLO_REQ`
+- Motion and LED requests are no longer reported as accepted when the MCU link is missing or not yet `READY`; the runtime now returns explicit errors instead of silently no-oping
+
+### Changed
+- MCU runtime events are now dispatched into motion, LED, and sensor services, giving ESP32 a minimal live-consumption path for `ACK / NACK / FAULT / MOTION_DONE / LED_DONE / TOUCH_EVENT / MAG_STATE / IMU_STATE`
+- `HELLO_RSP -> READY` promotion no longer happens implicitly inside the bootstrap helper; it is now handled explicitly at the app layer with the current safe-default baseline path while full baseline restore remains pending
+
 ---
 
 ## [0.2.6] - 2026-04-12
