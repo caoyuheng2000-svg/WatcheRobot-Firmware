@@ -3,6 +3,10 @@
 
 #include <string.h>
 
+enum {
+    MCU_LINK_READ_CHUNK_SIZE = 64,
+};
+
 static uint32_t decode_u32_le(const uint8_t *src)
 {
     return ((uint32_t)src[0]) | ((uint32_t)src[1] << 8u) | ((uint32_t)src[2] << 16u) | ((uint32_t)src[3] << 24u);
@@ -200,6 +204,111 @@ static esp_err_t mcu_link_handle_frame(mcu_link_t *link, const mcu_frame_t *fram
     return ESP_ERR_NOT_FOUND;
 }
 
+static void mcu_link_store_pending_bytes(mcu_link_t *link, const uint8_t *bytes, size_t byte_count)
+{
+    if (link == NULL) {
+        return;
+    }
+
+    if (bytes == NULL || byte_count == 0u) {
+        link->rx.pending_len = 0u;
+        return;
+    }
+
+    if (byte_count > sizeof(link->rx.pending)) {
+        byte_count = sizeof(link->rx.pending);
+    }
+
+    memmove(link->rx.pending, bytes, byte_count);
+    link->rx.pending_len = byte_count;
+}
+
+static esp_err_t mcu_link_process_frame_candidate(mcu_link_t *link, mcu_link_event_t *out_event, bool *out_has_event)
+{
+    uint8_t raw[MCU_FRAME_MAX_RAW_SIZE];
+    mcu_frame_t frame;
+    size_t raw_len = 0u;
+    size_t payload_len = 0u;
+    esp_err_t decode_ret;
+
+    if (link == NULL || out_has_event == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *out_has_event = false;
+    if (link->rx.stream_len == 0u) {
+        return ESP_OK;
+    }
+
+    link->rx.stream[link->rx.stream_len] = 0u;
+    decode_ret = mcu_wire_decode_raw(link->rx.stream, link->rx.stream_len + 1u, raw, sizeof(raw), &raw_len);
+    if (decode_ret != ESP_OK) {
+        mcu_link_record_crc_error(link);
+        link->rx.stream_len = 0u;
+        return ESP_OK;
+    }
+
+    decode_ret = mcu_frame_unpack(raw, raw_len, &frame, &payload_len);
+    if (decode_ret != ESP_OK) {
+        mcu_link_record_crc_error(link);
+        link->rx.stream_len = 0u;
+        return ESP_OK;
+    }
+
+    frame.header.payload_len = (uint16_t)payload_len;
+    decode_ret = mcu_link_handle_frame(link, &frame, out_event);
+    link->rx.stream_len = 0u;
+    if (decode_ret == ESP_OK) {
+        *out_has_event = true;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t mcu_link_process_bytes(mcu_link_t *link,
+                                        const uint8_t *bytes,
+                                        size_t byte_count,
+                                        size_t *out_consumed,
+                                        mcu_link_event_t *out_event,
+                                        bool *out_has_event)
+{
+    size_t i;
+
+    if (link == NULL || bytes == NULL || out_consumed == NULL || out_has_event == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *out_consumed = 0u;
+    *out_has_event = false;
+
+    for (i = 0u; i < byte_count; ++i) {
+        const uint8_t byte = bytes[i];
+
+        if (byte == 0u) {
+            esp_err_t ret = mcu_link_process_frame_candidate(link, out_event, out_has_event);
+            if (ret != ESP_OK) {
+                return ret;
+            }
+
+            *out_consumed = i + 1u;
+            if (*out_has_event) {
+                return ESP_OK;
+            }
+            continue;
+        }
+
+        if (link->rx.stream_len >= (sizeof(link->rx.stream) - 1u)) {
+            mcu_link_record_crc_error(link);
+            link->rx.stream_len = 0u;
+        }
+
+        link->rx.stream[link->rx.stream_len++] = byte;
+        *out_consumed = i + 1u;
+    }
+
+    return ESP_OK;
+}
+
 esp_err_t mcu_link_init(mcu_link_t *link)
 {
     if (link == NULL) {
@@ -209,6 +318,7 @@ esp_err_t mcu_link_init(mcu_link_t *link)
     mcu_link_stats_init(&link->stats);
     link->next_tx_seq = 1u;
     link->rx.stream_len = 0u;
+    link->rx.pending_len = 0u;
     return mcu_link_fsm_init(&link->fsm);
 }
 
@@ -220,6 +330,7 @@ esp_err_t mcu_link_reset(mcu_link_t *link)
 
     link->next_tx_seq = 1u;
     link->rx.stream_len = 0u;
+    link->rx.pending_len = 0u;
     return mcu_link_fsm_init(&link->fsm);
 }
 
@@ -436,7 +547,7 @@ esp_err_t mcu_link_send_hello_req(mcu_link_t *link, uint32_t *out_seq, size_t *o
 
 esp_err_t mcu_link_poll(mcu_link_t *link, mcu_link_event_t *out_event)
 {
-    uint8_t read_buf[64];
+    uint8_t read_buf[MCU_LINK_READ_CHUNK_SIZE];
     size_t buffered = 0u;
     size_t read_len = 0u;
     esp_err_t ret;
@@ -453,17 +564,36 @@ esp_err_t mcu_link_poll(mcu_link_t *link, mcu_link_event_t *out_event)
         return ESP_ERR_INVALID_STATE;
     }
 
-    ret = mcu_link_uart_get_buffered_bytes(&buffered);
-    if (ret != ESP_OK) {
-        return ret;
-    }
+    while (true) {
+        if (link->rx.pending_len > 0u) {
+            size_t consumed = 0u;
+            bool has_event = false;
 
-    while (buffered > 0u) {
-        const size_t chunk_len = (buffered < sizeof(read_buf)) ? buffered : sizeof(read_buf);
-        size_t i;
+            ret = mcu_link_process_bytes(link, link->rx.pending, link->rx.pending_len, &consumed, out_event, &has_event);
+            if (ret != ESP_OK) {
+                return ret;
+            }
+
+            if (has_event) {
+                mcu_link_store_pending_bytes(link, &link->rx.pending[consumed], link->rx.pending_len - consumed);
+                return ESP_OK;
+            }
+
+            link->rx.pending_len = 0u;
+            continue;
+        }
+
+        ret = mcu_link_uart_get_buffered_bytes(&buffered);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+
+        if (buffered == 0u) {
+            break;
+        }
 
         read_len = 0u;
-        ret = mcu_link_uart_read(read_buf, chunk_len, 0u, &read_len);
+        ret = mcu_link_uart_read(read_buf, (buffered < sizeof(read_buf)) ? buffered : sizeof(read_buf), 0u, &read_len);
         if (ret != ESP_OK) {
             return ret;
         }
@@ -472,50 +602,19 @@ esp_err_t mcu_link_poll(mcu_link_t *link, mcu_link_event_t *out_event)
             break;
         }
 
-        for (i = 0u; i < read_len; ++i) {
-            const uint8_t byte = read_buf[i];
+        {
+            size_t consumed = 0u;
+            bool has_event = false;
 
-            if (byte == 0u) {
-                if (link->rx.stream_len > 0u) {
-                    uint8_t raw[MCU_FRAME_MAX_RAW_SIZE];
-                    mcu_frame_t frame;
-                    size_t raw_len = 0u;
-                    size_t payload_len = 0u;
-                    esp_err_t decode_ret;
-
-                    decode_ret = mcu_wire_decode_raw(link->rx.stream, link->rx.stream_len, raw, sizeof(raw), &raw_len);
-                    if (decode_ret != ESP_OK) {
-                        mcu_link_record_crc_error(link);
-                    } else {
-                        decode_ret = mcu_frame_unpack(raw, raw_len, &frame, &payload_len);
-                        if (decode_ret != ESP_OK) {
-                            mcu_link_record_crc_error(link);
-                        } else {
-                            frame.header.payload_len = (uint16_t)payload_len;
-                            decode_ret = mcu_link_handle_frame(link, &frame, out_event);
-                            if (decode_ret == ESP_OK) {
-                                link->rx.stream_len = 0u;
-                                return ESP_OK;
-                            }
-                        }
-                    }
-                }
-
-                link->rx.stream_len = 0u;
-                continue;
+            ret = mcu_link_process_bytes(link, read_buf, read_len, &consumed, out_event, &has_event);
+            if (ret != ESP_OK) {
+                return ret;
             }
 
-            if (link->rx.stream_len >= sizeof(link->rx.stream)) {
-                mcu_link_record_crc_error(link);
-                link->rx.stream_len = 0u;
+            if (has_event) {
+                mcu_link_store_pending_bytes(link, &read_buf[consumed], read_len - consumed);
+                return ESP_OK;
             }
-
-            link->rx.stream[link->rx.stream_len++] = byte;
-        }
-
-        ret = mcu_link_uart_get_buffered_bytes(&buffered);
-        if (ret != ESP_OK) {
-            return ret;
         }
     }
 

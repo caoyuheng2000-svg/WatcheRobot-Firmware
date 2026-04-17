@@ -24,6 +24,8 @@ typedef struct {
     struct {
         uint8_t stream[MCU_FRAME_MAX_WIRE_SIZE];
         size_t stream_len;
+        uint8_t pending[MCU_FRAME_MAX_WIRE_SIZE];
+        size_t pending_len;
     } rx;
 } mcu_link_t;
 
