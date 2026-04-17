@@ -282,7 +282,7 @@ HIL 工具建议：
 - `servo_stop_interrupt`
 - `led_effect_ack_done`
 - `touch_press_release`
-- `imu_state_rate_20hz`
+- `imu_state_event_driven`
 - `coproc_reset_recovery`
 - `crc_fault_injection`
 
@@ -312,7 +312,8 @@ HIL 工具建议：
 - 灯效 accepted + done
   - `LED_SET_EFFECT -> ACK -> LED_DONE`
 - 状态流压力
-  - 高频 `IMU_STATE` + 间歇 `MAG_STATE`
+  - `SERVO_MOVE 5Hz` + 间歇 `MAG_STATE` + `TOUCH_EVENT burst`
+  - `IMU_STATE` 仅在问询或姿态变化事件场景单独验证
 - 坏帧恢复
   - 错 CRC
   - 截断帧
@@ -337,7 +338,8 @@ HIL 工具建议：
 - `L3` 的 UART mock 集成测试全绿
 - `ACK/NACK/DONE/FAULT` 全链路可通过 mock 场景重复验证
 - `snapshot` 和 `no-snapshot` 两条恢复路径都已通过 mock
-- 高频 `IMU_STATE` 注入下，`ACK` 处理不会被饿死
+- 标准压力场景下，`ACK` 处理不会被 `MAG_STATE / TOUCH_EVENT` 上报饿死
+- `IMU_STATE` 的问询触发与姿态变化触发路径可单独验证
 - 所有关键统计字段都能在 mock 场景中被触发和断言
 
 只有满足这些条件，才进入真 UART 驱动联调和 STM32 实机 HIL。
