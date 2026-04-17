@@ -35,6 +35,9 @@ set(EXTRA_COMPONENT_DIRS
 )
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+if(CMAKE_BINARY_DIR MATCHES "build-s3-c-stress")
+    add_compile_definitions(WATCHER_STRESS_BUILD=1)
+endif()
 project(WatcheRobot-S3)
 # Keep custom generators on the same interpreter as the active ESP-IDF build.
 idf_build_get_property(project_python PYTHON)

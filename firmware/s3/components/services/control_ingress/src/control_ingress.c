@@ -311,6 +311,10 @@ esp_err_t control_ingress_init(void) {
 }
 
 esp_err_t control_ingress_submit_servo(const control_servo_request_t *req) {
+    return control_ingress_submit_servo_with_seq(req, NULL);
+}
+
+esp_err_t control_ingress_submit_servo_with_seq(const control_servo_request_t *req, uint32_t *out_seq) {
     esp_err_t interrupt_ret;
 
     if (req == NULL) {
@@ -335,11 +339,15 @@ esp_err_t control_ingress_submit_servo(const control_servo_request_t *req) {
     }
 
     if (req->has_x && req->has_y) {
-        return hal_servo_move_sync(req->x_deg, req->y_deg, req->duration_ms);
+        return hal_servo_move_sync_with_source_and_seq(req->x_deg, req->y_deg, req->duration_ms,
+                                                       HAL_SERVO_MOTION_SOURCE_UNKNOWN, out_seq);
     }
 
-    return hal_servo_move_smooth(req->has_x ? SERVO_AXIS_X : SERVO_AXIS_Y, req->has_x ? req->x_deg : req->y_deg,
-                                 req->duration_ms);
+    return hal_servo_move_smooth_with_source_and_seq(req->has_x ? SERVO_AXIS_X : SERVO_AXIS_Y,
+                                                     req->has_x ? req->x_deg : req->y_deg,
+                                                     req->duration_ms,
+                                                     HAL_SERVO_MOTION_SOURCE_UNKNOWN,
+                                                     out_seq);
 }
 
 esp_err_t control_ingress_submit_ai_status(const control_ai_status_request_t *req) {

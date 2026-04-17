@@ -37,6 +37,7 @@ typedef struct {
 } mcu_motion_request_t;
 
 esp_err_t mcu_motion_service_init(void);
+esp_err_t mcu_motion_submit_with_seq(const mcu_motion_request_t *request, uint32_t *out_seq);
 esp_err_t mcu_motion_submit(const mcu_motion_request_t *request);
 esp_err_t mcu_motion_service_get_last_request(mcu_motion_request_t *out_request);
 esp_err_t mcu_motion_stop(mcu_motion_source_t source);

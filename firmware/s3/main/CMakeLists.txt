@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "app_main.c"
         "mem_monitor.c"
+        "stress_mode.c"
     INCLUDE_DIRS "."
     REQUIRES
         # Drivers

@@ -7,6 +7,7 @@
 #include <string.h>
 
 static const char *TAG = "MCU_LED";
+static const char *OBS_TAG = "MCU_OBS";
 
 static mcu_led_request_t s_last_request;
 static bool s_has_last_request;
@@ -204,6 +205,8 @@ esp_err_t mcu_led_service_handle_link_event(const mcu_link_event_t *event)
             if (!s_command_inflight || ref_seq == s_last_command_seq) {
                 ESP_LOGI(TAG, "LED DONE ref_seq=%lu result=%u", (unsigned long)ref_seq,
                          (unsigned)event->frame.payload[4]);
+                ESP_LOGI(OBS_TAG, "evt=led_done ref_seq=%lu msg_class=%u msg_id=%u result=%u", (unsigned long)ref_seq,
+                         (unsigned)MCU_FRAME_CLASS_LED, (unsigned)MCU_LED_MSG_DONE, (unsigned)event->frame.payload[4]);
                 s_command_inflight = false;
             }
             return ESP_OK;

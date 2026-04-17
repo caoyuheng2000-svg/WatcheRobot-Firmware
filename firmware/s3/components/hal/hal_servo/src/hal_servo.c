@@ -159,6 +159,15 @@ esp_err_t hal_servo_move_smooth_with_source(servo_axis_t axis,
                                             int duration_ms,
                                             hal_servo_motion_source_t source)
 {
+    return hal_servo_move_smooth_with_source_and_seq(axis, angle_deg, duration_ms, source, NULL);
+}
+
+esp_err_t hal_servo_move_smooth_with_source_and_seq(servo_axis_t axis,
+                                                    int angle_deg,
+                                                    int duration_ms,
+                                                    hal_servo_motion_source_t source,
+                                                    uint32_t *out_seq)
+{
     mcu_motion_request_t request;
     esp_err_t ret;
     int clamped_angle;
@@ -183,7 +192,7 @@ esp_err_t hal_servo_move_smooth_with_source(servo_axis_t axis,
         return ret;
     }
 
-    ret = mcu_motion_submit(&request);
+    ret = mcu_motion_submit_with_seq(&request, out_seq);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to submit servo motion: axis=%s angle=%d duration_ms=%d err=%s",
                  axis == SERVO_AXIS_X ? "X" : "Y", clamped_angle, duration_ms, esp_err_to_name(ret));
@@ -191,8 +200,10 @@ esp_err_t hal_servo_move_smooth_with_source(servo_axis_t axis,
     }
 
     servo_cache_angle(axis, clamped_angle);
+#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
     ESP_LOGI(TAG, "Queued servo motion via coprocessor: axis=%s angle=%d duration_ms=%u source=%d",
              axis == SERVO_AXIS_X ? "X" : "Y", clamped_angle, (unsigned)request.duration_ms, (int)source);
+#endif
     return ESP_OK;
 }
 
@@ -205,6 +216,15 @@ esp_err_t hal_servo_move_sync_with_source(int x_deg,
                                           int y_deg,
                                           int duration_ms,
                                           hal_servo_motion_source_t source)
+{
+    return hal_servo_move_sync_with_source_and_seq(x_deg, y_deg, duration_ms, source, NULL);
+}
+
+esp_err_t hal_servo_move_sync_with_source_and_seq(int x_deg,
+                                                  int y_deg,
+                                                  int duration_ms,
+                                                  hal_servo_motion_source_t source,
+                                                  uint32_t *out_seq)
 {
     mcu_motion_request_t request;
     esp_err_t ret;
@@ -228,7 +248,7 @@ esp_err_t hal_servo_move_sync_with_source(int x_deg,
         return ret;
     }
 
-    ret = mcu_motion_submit(&request);
+    ret = mcu_motion_submit_with_seq(&request, out_seq);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to submit sync servo motion: x=%d y=%d duration_ms=%d err=%s", clamped_x, clamped_y,
                  duration_ms, esp_err_to_name(ret));
@@ -236,8 +256,10 @@ esp_err_t hal_servo_move_sync_with_source(int x_deg,
     }
 
     servo_cache_sync_angles(clamped_x, clamped_y);
+#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
     ESP_LOGI(TAG, "Queued sync servo motion via coprocessor: x=%d y=%d duration_ms=%u source=%d", clamped_x, clamped_y,
              (unsigned)request.duration_ms, (int)source);
+#endif
     return ESP_OK;
 }
 

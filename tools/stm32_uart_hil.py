@@ -16,15 +16,18 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Callable, Iterable, Optional, Protocol
 
 
 SCHEMA_VERSION = "v1"
 DEFAULT_STREAM_PROFILE = "v1_default"
 DEFAULT_SCENARIO = "hello_heartbeat_smoke"
+STRESS_STANDARD_SCENARIO = "stress_standard"
 
 SNAPSHOT_REQUIRED = "required"
 SNAPSHOT_FORBIDDEN = "forbidden"
@@ -128,14 +131,15 @@ SCENARIO_SPECS: dict[str, ScenarioSpec] = {
             ScenarioStep("inject", "MAG_STATE sample=1"),
         ),
     ),
-    "imu_state_rate_20hz": ScenarioSpec(
-        name="imu_state_rate_20hz",
+    "imu_state_event_driven": ScenarioSpec(
+        name="imu_state_event_driven",
         snapshot_gate=SNAPSHOT_OPTIONAL,
         duration_ms=130,
-        description="Verify IMU state uses latest-state-wins under burst load",
+        description="Verify IMU state only surfaces on query or posture-change triggers",
         steps=(
-            ScenarioStep("inject", "IMU_STATE burst=20hz"),
-            ScenarioStep("inject", "IMU_STATE collapse=latest", {"dropped_state_count": 4}),
+            ScenarioStep("send", "IMU_STATE_QUERY"),
+            ScenarioStep("inject", "IMU_STATE source=query"),
+            ScenarioStep("inject", "IMU_STATE source=posture_change"),
         ),
     ),
     "coproc_reset_recovery": ScenarioSpec(
@@ -184,6 +188,13 @@ SCENARIO_SPECS: dict[str, ScenarioSpec] = {
             ScenarioStep("inject", "GOOD_FRAME resync"),
         ),
     ),
+    STRESS_STANDARD_SCENARIO: ScenarioSpec(
+        name=STRESS_STANDARD_SCENARIO,
+        snapshot_gate=SNAPSHOT_OPTIONAL,
+        duration_ms=600_000,
+        description="Verify 10-minute dual-MCU stress bench against structured MCU_OBS/STM32_OBS metrics without continuous IMU streaming",
+        steps=(),
+    ),
 }
 
 SCENARIOS = tuple(SCENARIO_SPECS)
@@ -191,6 +202,12 @@ SCENARIOS = tuple(SCENARIO_SPECS)
 
 @dataclass(slots=True)
 class HILMetrics:
+    servo_submit_count: int = 0
+    motion_ack_count: int = 0
+    motion_done_count: int = 0
+    touch_rx_count: int = 0
+    mag_rx_count: int = 0
+    imu_rx_count: int = 0
     ack_timeout_count: int = 0
     crc_error_count: int = 0
     dropped_state_count: int = 0
@@ -234,13 +251,9 @@ class HILScenarioResult:
             "transport": self.transport,
             "execution_mode": self.execution_mode,
             "scenario_metadata": self.scenario_metadata,
-            "ack_timeout_count": self.metrics.ack_timeout_count,
-            "crc_error_count": self.metrics.crc_error_count,
-            "dropped_state_count": self.metrics.dropped_state_count,
-            "reconnect_count": self.metrics.reconnect_count,
-            "motion_done_fault_count": self.metrics.motion_done_fault_count,
             "notes": self.notes,
         }
+        payload.update(self.metrics.to_json())
         return payload
 
 
@@ -275,13 +288,9 @@ class HILSuiteResult:
             "summary": self.summary,
             "scenario_results": self.scenario_results,
             "scenario_metadata": self.scenario_metadata,
-            "ack_timeout_count": self.metrics.ack_timeout_count,
-            "crc_error_count": self.metrics.crc_error_count,
-            "dropped_state_count": self.metrics.dropped_state_count,
-            "reconnect_count": self.metrics.reconnect_count,
-            "motion_done_fault_count": self.metrics.motion_done_fault_count,
             "notes": self.notes,
         }
+        payload.update(self.metrics.to_json())
         return payload
 
 
@@ -351,10 +360,27 @@ class SerialTransport:
 
     name = TRANSPORT_SERIAL
 
-    def __init__(self, port: str, baud: int) -> None:
+    def __init__(
+        self,
+        port: str,
+        baud: int,
+        *,
+        esp_alias: str,
+        stm32_alias: str,
+        feature: str,
+        duration_sec: float,
+        output_root: Optional[str],
+        session_dir: Optional[str],
+    ) -> None:
         self.port = port
         self.baud = baud
         self._serial = None
+        self.esp_alias = esp_alias
+        self.stm32_alias = stm32_alias
+        self.feature = feature
+        self.duration_sec = duration_sec
+        self.output_root = output_root
+        self.session_dir = session_dir
 
     def open(self) -> None:
         try:
@@ -392,6 +418,119 @@ class SerialTransport:
 
     def inject_rx(self, data: bytes) -> None:
         raise NotImplementedError("serial transport does not support injection")
+
+
+def _parse_numeric(value: str) -> int:
+    return int(value, 0)
+
+
+def _load_session_timeline(session_dir: Path) -> list[dict[str, object]]:
+    timeline_path = session_dir / "timeline.ndjson"
+    if not timeline_path.exists():
+        raise RuntimeError(f"missing timeline file: {timeline_path}")
+
+    records: list[dict[str, object]] = []
+    for line in timeline_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        records.append(json.loads(line))
+    return records
+
+
+def _latest_kv(records: list[dict[str, object]], source: str, evt: str) -> Optional[dict[str, str]]:
+    for record in reversed(records):
+        if record.get("source") != source:
+            continue
+        kv = record.get("kv")
+        if isinstance(kv, dict) and kv.get("evt") == evt:
+            return {str(key): str(value) for key, value in kv.items()}
+    return None
+
+
+def _has_evt(records: list[dict[str, object]], source: str, evt: str) -> bool:
+    return _latest_kv(records, source, evt) is not None
+
+
+def _capture_serial_session(transport: SerialTransport) -> Path:
+    session_script = Path(__file__).resolve().parent / "stm32_bringup_session.py"
+    command = [
+        sys.executable,
+        str(session_script),
+        "--esp-alias",
+        transport.esp_alias,
+        "--stm32-alias",
+        transport.stm32_alias,
+        "--feature",
+        transport.feature,
+        "--duration-sec",
+        str(transport.duration_sec),
+    ]
+    if transport.output_root:
+        command.extend(["--output-root", transport.output_root])
+
+    completed = subprocess.run(command, capture_output=True, text=True, check=True)
+    for line in completed.stdout.splitlines():
+        if line.startswith("Session captured to "):
+            return Path(line.removeprefix("Session captured to ").strip())
+    raise RuntimeError("session capture completed but did not report the session directory")
+
+
+def evaluate_stress_standard_session(session_dir: Path) -> tuple[HILMetrics, list[str], dict[str, object]]:
+    records = _load_session_timeline(session_dir)
+    metrics = HILMetrics()
+    failures: list[str] = []
+
+    stress_kv = _latest_kv(records, "esp32", "stress_stats")
+    if stress_kv is None:
+        raise RuntimeError("missing MCU_OBS evt=stress_stats in timeline")
+
+    stats_kv = _latest_kv(records, "esp32", "stats") or {}
+    for field_name in (
+        "servo_submit_count",
+        "motion_ack_count",
+        "motion_done_count",
+        "touch_rx_count",
+        "mag_rx_count",
+        "imu_rx_count",
+        "ack_timeout_count",
+        "crc_error_count",
+        "dropped_state_count",
+        "reconnect_count",
+        "motion_done_fault_count",
+    ):
+        source = stress_kv if field_name in stress_kv else stats_kv
+        value = source.get(field_name, "0")
+        setattr(metrics, field_name, _parse_numeric(value))
+
+    if not _has_evt(records, "esp32", "ready"):
+        failures.append("missing_ready")
+    if _has_evt(records, "stm32", "dispatch_fail"):
+        failures.append("stm32_dispatch_fail_seen")
+    if metrics.ack_timeout_count != 0:
+        failures.append("ack_timeout_count_nonzero")
+    if metrics.crc_error_count != 0:
+        failures.append("crc_error_count_nonzero")
+    if metrics.motion_done_fault_count != 0:
+        failures.append("motion_done_fault_count_nonzero")
+    if metrics.reconnect_count != 0:
+        failures.append("reconnect_count_nonzero")
+    if metrics.servo_submit_count < 2800:
+        failures.append("servo_submit_count_below_threshold")
+    if metrics.motion_ack_count != metrics.servo_submit_count:
+        failures.append("motion_ack_count_mismatch")
+    if metrics.motion_done_count != metrics.servo_submit_count:
+        failures.append("motion_done_count_mismatch")
+    if metrics.mag_rx_count < 1000:
+        failures.append("mag_rx_count_below_threshold")
+    if metrics.touch_rx_count < 500:
+        failures.append("touch_rx_count_below_threshold")
+
+    metadata = {
+        "session_dir": str(session_dir),
+        "timeline_path": str(session_dir / "timeline.ndjson"),
+        "record_count": len(records),
+    }
+    return metrics, failures, metadata
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -434,6 +573,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--port", help="Serial port for --transport serial, e.g. COM7")
     parser.add_argument("--baud", type=int, default=921600, help="Serial baud rate")
+    parser.add_argument("--esp-alias", default="s3-c", help="ESP32 alias used by session capture in serial mode")
+    parser.add_argument("--stm32-alias", default="stm32-c", help="STM32 alias used by session capture in serial mode")
+    parser.add_argument("--feature", default="stm32-uart2-bringup", help="Session feature name for serial capture")
+    parser.add_argument("--duration-sec", type=float, default=600.0, help="Serial stress capture duration in seconds")
+    parser.add_argument("--output-root", help="Optional output root override passed to stm32_bringup_session.py")
+    parser.add_argument("--session-dir", help="Existing session directory to analyze instead of capturing a new one")
     parser.add_argument(
         "--snapshot-capability",
         choices=("auto", "yes", "no"),
@@ -452,7 +597,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _make_transport(args: argparse.Namespace) -> Transport:
     if args.transport == TRANSPORT_SERIAL:
-        return SerialTransport(args.port or "PLACEHOLDER", args.baud)
+        return SerialTransport(
+            args.port or "PLACEHOLDER",
+            args.baud,
+            esp_alias=args.esp_alias,
+            stm32_alias=args.stm32_alias,
+            feature=args.feature,
+            duration_sec=args.duration_sec,
+            output_root=args.output_root,
+            session_dir=args.session_dir,
+        )
     return MockTransport()
 
 
@@ -517,6 +671,76 @@ def _run_single_scenario(
         selected_snapshot_capability,
         scenario_index,
     )
+
+    if transport.name == TRANSPORT_SERIAL and spec.name == STRESS_STANDARD_SCENARIO:
+        serial_transport = transport
+        assert isinstance(serial_transport, SerialTransport)
+
+        try:
+            session_dir = Path(serial_transport.session_dir) if serial_transport.session_dir else _capture_serial_session(serial_transport)
+            metrics, failures, session_metadata = evaluate_stress_standard_session(session_dir)
+            scenario_metadata.update(session_metadata)
+            notes.append(f"session_dir={session_dir}")
+        except subprocess.CalledProcessError as exc:
+            notes.append(f"session capture failed: {exc.stderr or exc.stdout or exc}")
+            scenario_metadata["result_reason"] = "session_capture_failed"
+            return HILScenarioResult(
+                schema_version=SCHEMA_VERSION,
+                scenario=spec.name,
+                scenario_index=scenario_index,
+                result=RESULT_FAILED,
+                result_reason="session_capture_failed",
+                transport=transport.name,
+                execution_mode=EXECUTION_MODE_DETERMINISTIC,
+                scenario_metadata=scenario_metadata,
+                metrics=metrics,
+                notes=notes,
+            )
+        except Exception as exc:
+            notes.append(f"stress session evaluation failed: {exc}")
+            scenario_metadata["result_reason"] = "stress_evaluation_failed"
+            return HILScenarioResult(
+                schema_version=SCHEMA_VERSION,
+                scenario=spec.name,
+                scenario_index=scenario_index,
+                result=RESULT_FAILED,
+                result_reason="stress_evaluation_failed",
+                transport=transport.name,
+                execution_mode=EXECUTION_MODE_DETERMINISTIC,
+                scenario_metadata=scenario_metadata,
+                metrics=metrics,
+                notes=notes,
+            )
+
+        if failures:
+            notes.extend(failures)
+            scenario_metadata["result_reason"] = "stress_assertion_failed"
+            return HILScenarioResult(
+                schema_version=SCHEMA_VERSION,
+                scenario=spec.name,
+                scenario_index=scenario_index,
+                result=RESULT_FAILED,
+                result_reason="stress_assertion_failed",
+                transport=transport.name,
+                execution_mode=EXECUTION_MODE_DETERMINISTIC,
+                scenario_metadata=scenario_metadata,
+                metrics=metrics,
+                notes=notes,
+            )
+
+        scenario_metadata["result_reason"] = "completed"
+        return HILScenarioResult(
+            schema_version=SCHEMA_VERSION,
+            scenario=spec.name,
+            scenario_index=scenario_index,
+            result=RESULT_PASSED,
+            result_reason="completed",
+            transport=transport.name,
+            execution_mode=EXECUTION_MODE_DETERMINISTIC,
+            scenario_metadata=scenario_metadata,
+            metrics=metrics,
+            notes=notes,
+        )
 
     if transport.name == TRANSPORT_SERIAL:
         notes.append("serial transport is a placeholder until hardware is wired")
