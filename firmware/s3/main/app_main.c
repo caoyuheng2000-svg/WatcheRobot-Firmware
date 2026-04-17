@@ -42,6 +42,7 @@
 #include <string.h>
 
 #define TAG "MAIN"
+#define MCU_OBS_TAG "MCU_OBS"
 
 /* Physical restart: click count to trigger reboot */
 #define RESTART_CLICK_COUNT 3
@@ -127,6 +128,86 @@ static int64_t s_cached_ws_connect_started_us = 0;
 static int64_t s_wifi_recovery_started_us = 0;
 static QueueHandle_t s_discovery_result_queue = NULL;
 static char s_cached_ws_url[CACHED_WS_URL_MAX_LEN] = {0};
+static bool s_mcu_obs_state_initialized = false;
+static mcu_link_state_t s_last_mcu_obs_state = MCU_LINK_STATE_DOWN;
+static bool s_mcu_obs_stats_initialized = false;
+static mcu_link_stats_t s_last_mcu_obs_stats = {0};
+static int64_t s_last_mcu_obs_stats_log_us = 0;
+
+static uint16_t decode_u16_le(const uint8_t *src) {
+    return (uint16_t)(((uint16_t)src[0]) | ((uint16_t)src[1] << 8u));
+}
+
+static uint32_t decode_u32_le(const uint8_t *src) {
+    return ((uint32_t)src[0]) | ((uint32_t)src[1] << 8u) | ((uint32_t)src[2] << 16u) | ((uint32_t)src[3] << 24u);
+}
+
+static const char *mcu_link_state_to_string(mcu_link_state_t state) {
+    switch (state) {
+    case MCU_LINK_STATE_DOWN:
+        return "DOWN";
+    case MCU_LINK_STATE_HANDSHAKING:
+        return "HANDSHAKING";
+    case MCU_LINK_STATE_LINK_READY:
+        return "LINK_READY";
+    case MCU_LINK_STATE_READY:
+        return "READY";
+    case MCU_LINK_STATE_DEGRADED:
+        return "DEGRADED";
+    case MCU_LINK_STATE_RECOVERING:
+        return "RECOVERING";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+static void log_mcu_obs_stats(mcu_link_t *link, const char *reason) {
+    mcu_link_stats_t stats = {0};
+
+    if (link == NULL || mcu_link_copy_stats(link, &stats) != ESP_OK) {
+        return;
+    }
+
+    ESP_LOGI(MCU_OBS_TAG,
+             "evt=stats reason=%s link_state=%s ack_timeout_count=%lu reconnect_count=%lu "
+             "motion_done_fault_count=%lu dropped_state_count=%lu crc_error_count=%lu",
+             reason ? reason : "unspecified", mcu_link_state_to_string(mcu_link_get_state(link)),
+             (unsigned long)stats.ack_timeout_count, (unsigned long)stats.reconnect_count,
+             (unsigned long)stats.motion_done_fault_count, (unsigned long)stats.dropped_state_count,
+             (unsigned long)stats.crc_error_count);
+
+    s_last_mcu_obs_stats = stats;
+    s_last_mcu_obs_stats_log_us = esp_timer_get_time();
+    s_mcu_obs_stats_initialized = true;
+}
+
+static void maybe_log_mcu_obs_stats(mcu_link_t *link, const char *reason, bool force) {
+    mcu_link_stats_t current_stats = {0};
+    bool changed;
+    bool periodic_due;
+
+    if (link == NULL || mcu_link_copy_stats(link, &current_stats) != ESP_OK) {
+        return;
+    }
+
+    changed = !s_mcu_obs_stats_initialized || memcmp(&current_stats, &s_last_mcu_obs_stats, sizeof(current_stats)) != 0;
+    periodic_due = s_last_mcu_obs_stats_log_us == 0 ||
+                   (esp_timer_get_time() - s_last_mcu_obs_stats_log_us) >= (5LL * 1000LL * 1000LL);
+
+    if (force || changed || periodic_due) {
+        log_mcu_obs_stats(link, reason);
+    }
+}
+
+static void maybe_log_mcu_obs_state_transition(mcu_link_t *link, const char *reason) {
+    const mcu_link_state_t current_state = (link != NULL) ? mcu_link_get_state(link) : MCU_LINK_STATE_DOWN;
+
+    if (!s_mcu_obs_state_initialized || current_state != s_last_mcu_obs_state) {
+        s_last_mcu_obs_state = current_state;
+        s_mcu_obs_state_initialized = true;
+        maybe_log_mcu_obs_stats(link, reason ? reason : "state_transition", true);
+    }
+}
 
 static const char *transport_state_to_string(transport_state_t state) {
     switch (state) {
@@ -209,6 +290,7 @@ static void configure_runtime_log_levels(void) {
 #if CONFIG_WATCHER_RUNTIME_QUIET_LOGS
     esp_log_level_set("*", ESP_LOG_WARN);
     esp_log_level_set(TAG, ESP_LOG_INFO);
+    esp_log_level_set(MCU_OBS_TAG, ESP_LOG_INFO);
     esp_log_level_set("MEM_MON", ESP_LOG_INFO);
 #endif
 }
@@ -534,6 +616,10 @@ static void init_mcu_link_bootstrap(void) {
     ESP_LOGI(TAG, "MCU link scaffold ready (present=%d state=%d link_ready=%d ready=%d)",
              link != NULL ? 1 : 0, (int)mcu_link_bootstrap_get_state(), mcu_link_bootstrap_is_link_ready() ? 1 : 0,
              mcu_link_bootstrap_is_ready() ? 1 : 0);
+    ESP_LOGI(MCU_OBS_TAG, "evt=link_bootstrap_ready link_state=%s link_ready=%d ready=%d",
+             mcu_link_state_to_string(mcu_link_bootstrap_get_state()), mcu_link_bootstrap_is_link_ready() ? 1 : 0,
+             mcu_link_bootstrap_is_ready() ? 1 : 0);
+    maybe_log_mcu_obs_state_transition(link, "bootstrap_ready");
 }
 
 static void init_mcu_runtime_services(void) {
@@ -570,6 +656,8 @@ static void maybe_complete_mcu_link_baseline_restore(const mcu_link_event_t *eve
     } else {
         ESP_LOGI(TAG, "MCU link restoring explicit safe-default baseline (no snapshot support)");
     }
+    ESP_LOGI(MCU_OBS_TAG, "evt=baseline_restore_begin link_state=%s snapshot_supported=%d",
+             mcu_link_state_to_string(mcu_link_get_state(link)), mcu_link_snapshot_supported(link) ? 1 : 0);
 
     ret = mcu_link_mark_baseline_synced(link);
     if (ret != ESP_OK) {
@@ -579,6 +667,12 @@ static void maybe_complete_mcu_link_baseline_restore(const mcu_link_event_t *eve
 
     ESP_LOGI(TAG, "MCU link baseline restore completed (state=%d ready=%d)", (int)mcu_link_get_state(link),
              mcu_link_is_ready(link) ? 1 : 0);
+    ESP_LOGI(MCU_OBS_TAG, "evt=baseline_restore_done link_state=%s ready=%d",
+             mcu_link_state_to_string(mcu_link_get_state(link)), mcu_link_is_ready(link) ? 1 : 0);
+    if (mcu_link_is_ready(link)) {
+        ESP_LOGI(MCU_OBS_TAG, "evt=ready link_state=%s", mcu_link_state_to_string(mcu_link_get_state(link)));
+    }
+    maybe_log_mcu_obs_state_transition(link, "baseline_restore_done");
 }
 
 static void dispatch_mcu_link_runtime_event(const mcu_link_event_t *event) {
@@ -589,6 +683,35 @@ static void dispatch_mcu_link_runtime_event(const mcu_link_event_t *event) {
         return;
     }
 
+    link = mcu_link_bootstrap_get_link();
+    switch (event->type) {
+    case MCU_LINK_RX_EVENT_HELLO_RSP:
+        ESP_LOGI(MCU_OBS_TAG, "evt=hello_rsp seq=%lu msg_class=%u msg_id=%u link_state=%s snapshot_supported=%d",
+                 (unsigned long)event->frame.header.seq, (unsigned)event->frame.header.msg_class,
+                 (unsigned)event->frame.header.msg_id, mcu_link_state_to_string(mcu_link_get_state(link)),
+                 (link != NULL && mcu_link_snapshot_supported(link)) ? 1 : 0);
+        break;
+    case MCU_LINK_RX_EVENT_ACK:
+        ESP_LOGI(MCU_OBS_TAG, "evt=ack ref_seq=%lu msg_class=%u msg_id=%u link_state=%s",
+                 (unsigned long)decode_u32_le(event->frame.payload), (unsigned)event->frame.header.msg_class,
+                 (unsigned)event->frame.header.msg_id, mcu_link_state_to_string(mcu_link_get_state(link)));
+        break;
+    case MCU_LINK_RX_EVENT_NACK:
+        ESP_LOGI(MCU_OBS_TAG, "evt=nack ref_seq=%lu reason_code=0x%04x msg_class=%u msg_id=%u link_state=%s",
+                 (unsigned long)decode_u32_le(event->frame.payload), (unsigned)decode_u16_le(&event->frame.payload[6]),
+                 (unsigned)event->frame.header.msg_class, (unsigned)event->frame.header.msg_id,
+                 mcu_link_state_to_string(mcu_link_get_state(link)));
+        break;
+    case MCU_LINK_RX_EVENT_FAULT:
+        ESP_LOGI(MCU_OBS_TAG,
+                 "evt=fault ref_seq=%lu fault_source=%u reason_code=0x%04x msg_class=%u msg_id=%u link_state=%s",
+                 (unsigned long)decode_u32_le(event->frame.payload), (unsigned)event->frame.payload[4],
+                 (unsigned)decode_u16_le(&event->frame.payload[5]), (unsigned)event->frame.header.msg_class,
+                 (unsigned)event->frame.header.msg_id, mcu_link_state_to_string(mcu_link_get_state(link)));
+        break;
+    default:
+        break;
+    }
     maybe_complete_mcu_link_baseline_restore(event);
     (void)mcu_motion_service_handle_link_event(event);
     (void)mcu_led_service_handle_link_event(event);
@@ -601,6 +724,9 @@ static void dispatch_mcu_link_runtime_event(const mcu_link_event_t *event) {
             (void)mcu_link_record_dropped_state(link);
         }
     }
+
+    maybe_log_mcu_obs_state_transition(link, "event_processed");
+    maybe_log_mcu_obs_stats(link, "event_processed", false);
 }
 
 static void service_mcu_link_runtime(void) {
@@ -617,10 +743,12 @@ static void service_mcu_link_runtime(void) {
         }
 
         if (ret == ESP_ERR_NOT_FOUND || ret == ESP_ERR_INVALID_STATE) {
+            maybe_log_mcu_obs_stats(mcu_link_bootstrap_get_link(), "periodic", false);
             return;
         }
 
         ESP_LOGW(TAG, "MCU link runtime poll failed: %s", esp_err_to_name(ret));
+        maybe_log_mcu_obs_stats(mcu_link_bootstrap_get_link(), "poll_error", true);
         return;
     }
 }
