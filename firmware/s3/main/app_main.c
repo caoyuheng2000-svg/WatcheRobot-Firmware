@@ -29,6 +29,7 @@
 #include "mcu_motion_service.h"
 #include "mcu_sensor_service.h"
 #include "sensecap-watcher.h"
+#include "stress_mode.h"
 #include "voice_service.h"
 #include "wifi_manager.h"
 #include "ws_client.h"
@@ -64,6 +65,14 @@
 #define WS_START_DISPLAY_SETTLE_MS 150U
 #define CLOUD_RUNTIME_MIN_INTERNAL_FREE_BYTES (24U * 1024U)
 #define CLOUD_RUNTIME_MIN_INTERNAL_LARGEST_BYTES (12U * 1024U)
+#if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
+#define MCU_LINK_RUNTIME_MAX_EVENTS_PER_TICK 64
+#define MCU_LINK_RUNTIME_TASK_PERIOD_MS 5
+#define MAIN_LOOP_DELAY_MS 10
+#else
+#define MCU_LINK_RUNTIME_MAX_EVENTS_PER_TICK 4
+#define MAIN_LOOP_DELAY_MS 100
+#endif
 // #define CAMERA_DIAG_MIN_INTERNAL_FREE_BYTES (48U * 1024U)
 // #define CAMERA_DIAG_MIN_INTERNAL_LARGEST_BYTES (16U * 1024U)
 #ifdef CONFIG_WATCHER_ANIM_FPS
@@ -133,6 +142,9 @@ static mcu_link_state_t s_last_mcu_obs_state = MCU_LINK_STATE_DOWN;
 static bool s_mcu_obs_stats_initialized = false;
 static mcu_link_stats_t s_last_mcu_obs_stats = {0};
 static int64_t s_last_mcu_obs_stats_log_us = 0;
+#if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
+static TaskHandle_t s_mcu_link_runtime_task = NULL;
+#endif
 
 static uint16_t decode_u16_le(const uint8_t *src) {
     return (uint16_t)(((uint16_t)src[0]) | ((uint16_t)src[1] << 8u));
@@ -193,6 +205,16 @@ static void maybe_log_mcu_obs_stats(mcu_link_t *link, const char *reason, bool f
     changed = !s_mcu_obs_stats_initialized || memcmp(&current_stats, &s_last_mcu_obs_stats, sizeof(current_stats)) != 0;
     periodic_due = s_last_mcu_obs_stats_log_us == 0 ||
                    (esp_timer_get_time() - s_last_mcu_obs_stats_log_us) >= (5LL * 1000LL * 1000LL);
+
+#if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
+    if (!force && reason != NULL && strcmp(reason, "event_processed") == 0) {
+        return;
+    }
+
+    if (!force && reason != NULL && strcmp(reason, "periodic") == 0 && !periodic_due) {
+        return;
+    }
+#endif
 
     if (force || changed || periodic_due) {
         log_mcu_obs_stats(link, reason);
@@ -309,6 +331,9 @@ static void maybe_play_ble_connected_feedback(void);
 static void boot_halt_with_error(const char *error_msg);
 static void log_directory_contents(const char *path);
 static int boot_prepare_animation_assets(void);
+#if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
+static void ensure_mcu_link_runtime_task_started(void);
+#endif
 
 #define LOG_HEAP_STATE(stage) mem_monitor_snapshot(stage)
 
@@ -636,6 +661,11 @@ static void init_mcu_runtime_services(void) {
         ESP_LOGE(TAG, "MCU sensor service init failed: %s", esp_err_to_name(ret));
         boot_halt_with_error("MCU sensor init failed");
     }
+
+    stress_mode_init();
+#if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
+    ensure_mcu_link_runtime_task_started();
+#endif
 }
 
 static void maybe_complete_mcu_link_baseline_restore(const mcu_link_event_t *event) {
@@ -670,6 +700,7 @@ static void maybe_complete_mcu_link_baseline_restore(const mcu_link_event_t *eve
     ESP_LOGI(MCU_OBS_TAG, "evt=baseline_restore_done link_state=%s ready=%d",
              mcu_link_state_to_string(mcu_link_get_state(link)), mcu_link_is_ready(link) ? 1 : 0);
     if (mcu_link_is_ready(link)) {
+        stress_mode_notify_ready();
         ESP_LOGI(MCU_OBS_TAG, "evt=ready link_state=%s", mcu_link_state_to_string(mcu_link_get_state(link)));
     }
     maybe_log_mcu_obs_state_transition(link, "baseline_restore_done");
@@ -692,9 +723,11 @@ static void dispatch_mcu_link_runtime_event(const mcu_link_event_t *event) {
                  (link != NULL && mcu_link_snapshot_supported(link)) ? 1 : 0);
         break;
     case MCU_LINK_RX_EVENT_ACK:
+#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
         ESP_LOGI(MCU_OBS_TAG, "evt=ack ref_seq=%lu msg_class=%u msg_id=%u link_state=%s",
                  (unsigned long)decode_u32_le(event->frame.payload), (unsigned)event->frame.header.msg_class,
                  (unsigned)event->frame.header.msg_id, mcu_link_state_to_string(mcu_link_get_state(link)));
+#endif
         break;
     case MCU_LINK_RX_EVENT_NACK:
         ESP_LOGI(MCU_OBS_TAG, "evt=nack ref_seq=%lu reason_code=0x%04x msg_class=%u msg_id=%u link_state=%s",
@@ -716,6 +749,7 @@ static void dispatch_mcu_link_runtime_event(const mcu_link_event_t *event) {
     (void)mcu_motion_service_handle_link_event(event);
     (void)mcu_led_service_handle_link_event(event);
     (void)mcu_sensor_service_handle_link_event(event, &overwrote_latest);
+    stress_mode_on_link_event(event);
 
     if (overwrote_latest &&
         (event->type == MCU_LINK_RX_EVENT_IMU_STATE || event->type == MCU_LINK_RX_EVENT_MAG_STATE)) {
@@ -732,7 +766,7 @@ static void dispatch_mcu_link_runtime_event(const mcu_link_event_t *event) {
 static void service_mcu_link_runtime(void) {
     int processed = 0;
 
-    while (processed < 4) {
+    while (processed < MCU_LINK_RUNTIME_MAX_EVENTS_PER_TICK) {
         mcu_link_event_t event = {0};
         esp_err_t ret = mcu_link_bootstrap_poll(&event);
 
@@ -752,6 +786,28 @@ static void service_mcu_link_runtime(void) {
         return;
     }
 }
+
+#if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
+static void mcu_link_runtime_task(void *arg) {
+    (void)arg;
+
+    while (true) {
+        service_mcu_link_runtime();
+        vTaskDelay(pdMS_TO_TICKS(MCU_LINK_RUNTIME_TASK_PERIOD_MS));
+    }
+}
+
+static void ensure_mcu_link_runtime_task_started(void) {
+    if (s_mcu_link_runtime_task != NULL) {
+        return;
+    }
+
+    if (xTaskCreate(mcu_link_runtime_task, "mcu_link_rt", 4096, NULL, 6, &s_mcu_link_runtime_task) != pdPASS) {
+        s_mcu_link_runtime_task = NULL;
+        ESP_LOGE(TAG, "Failed to create MCU link runtime task");
+    }
+}
+#endif
 
 // static void run_camera_boot_diag(void) {
 //     // Camera module intentionally disabled.
@@ -1648,11 +1704,14 @@ void app_main(void) {
     esp_task_wdt_add(NULL);
     while (1) {
         esp_task_wdt_reset();
+#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
         service_mcu_link_runtime();
+#endif
         transport_coordinator_tick();
         maybe_play_ble_connected_feedback();
         apply_idle_hint_if_needed();
         ws_tts_timeout_check();
-        vTaskDelay(pdMS_TO_TICKS(100));
+        stress_mode_tick();
+        vTaskDelay(pdMS_TO_TICKS(MAIN_LOOP_DELAY_MS));
     }
 }

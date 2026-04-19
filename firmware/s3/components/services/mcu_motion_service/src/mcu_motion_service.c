@@ -7,6 +7,9 @@
 #include <string.h>
 
 static const char *TAG = "MCU_MOTION";
+#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
+static const char *OBS_TAG = "MCU_OBS";
+#endif
 
 static mcu_motion_request_t s_last_request;
 static bool s_has_last_request;
@@ -23,10 +26,12 @@ static uint32_t decode_u32_le(const uint8_t *src)
     return ((uint32_t)src[0]) | ((uint32_t)src[1] << 8u) | ((uint32_t)src[2] << 16u) | ((uint32_t)src[3] << 24u);
 }
 
+#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
 static int16_t decode_i16_le(const uint8_t *src)
 {
     return (int16_t)decode_u16_le(src);
 }
+#endif
 
 static void encode_u16_le(uint8_t *dst, uint16_t value)
 {
@@ -39,7 +44,7 @@ static void encode_i16_le(uint8_t *dst, int16_t value)
     encode_u16_le(dst, (uint16_t)value);
 }
 
-static esp_err_t mcu_motion_submit_runtime_frame(const mcu_motion_request_t *request)
+static esp_err_t mcu_motion_submit_runtime_frame(const mcu_motion_request_t *request, uint32_t *out_seq)
 {
     uint8_t payload[9];
     mcu_link_t *link;
@@ -75,10 +80,15 @@ static esp_err_t mcu_motion_submit_runtime_frame(const mcu_motion_request_t *req
         return ret;
     }
 
+#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
     ESP_LOGI(TAG, "Queued SERVO_MOVE frame seq=%lu wire_len=%u axis_mask=0x%02x duration_ms=%u",
              (unsigned long)seq, (unsigned)wire_len, request->axis_mask, (unsigned)request->duration_ms);
+#endif
     s_last_command_seq = seq;
     s_command_inflight = true;
+    if (out_seq != NULL) {
+        *out_seq = seq;
+    }
     return ESP_OK;
 }
 
@@ -109,8 +119,10 @@ static esp_err_t mcu_motion_submit_stop_frame(mcu_motion_source_t source)
         return ret;
     }
 
+#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
     ESP_LOGI(TAG, "Queued SERVO_STOP frame seq=%lu wire_len=%u source=%u", (unsigned long)seq, (unsigned)wire_len,
              (unsigned)source);
+#endif
     s_last_command_seq = seq;
     s_command_inflight = true;
     return ESP_OK;
@@ -156,12 +168,17 @@ esp_err_t mcu_motion_service_init(void)
 
 esp_err_t mcu_motion_submit(const mcu_motion_request_t *request)
 {
+    return mcu_motion_submit_with_seq(request, NULL);
+}
+
+esp_err_t mcu_motion_submit_with_seq(const mcu_motion_request_t *request, uint32_t *out_seq)
+{
     if (!mcu_motion_request_is_valid(request)) {
         return ESP_ERR_INVALID_ARG;
     }
 
     {
-        esp_err_t ret = mcu_motion_submit_runtime_frame(request);
+        esp_err_t ret = mcu_motion_submit_runtime_frame(request, out_seq);
         if (ret != ESP_OK) {
             return ret;
         }
@@ -207,8 +224,10 @@ esp_err_t mcu_motion_service_handle_link_event(const mcu_link_event_t *event)
         case MCU_LINK_RX_EVENT_ACK:
             ref_seq = decode_u32_le(event->frame.payload);
             if (s_command_inflight && ref_seq == s_last_command_seq) {
+#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
                 ESP_LOGI(TAG, "Motion ACK ref_seq=%lu status=%u", (unsigned long)ref_seq,
                          (unsigned)decode_u16_le(&event->frame.payload[4]));
+#endif
             }
             return ESP_OK;
         case MCU_LINK_RX_EVENT_NACK:
@@ -231,11 +250,19 @@ esp_err_t mcu_motion_service_handle_link_event(const mcu_link_event_t *event)
         case MCU_LINK_RX_EVENT_MOTION_DONE:
             ref_seq = decode_u32_le(event->frame.payload);
             if (!s_command_inflight || ref_seq == s_last_command_seq) {
+#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
                 ESP_LOGI(TAG,
                          "Motion DONE ref_seq=%lu result=%u final=(%d,%d) exec_ms=%u",
                          (unsigned long)ref_seq, (unsigned)event->frame.payload[4],
                          (int)decode_i16_le(&event->frame.payload[5]), (int)decode_i16_le(&event->frame.payload[7]),
                          (unsigned)decode_u16_le(&event->frame.payload[9]));
+                ESP_LOGI(OBS_TAG,
+                         "evt=motion_done ref_seq=%lu msg_class=%u msg_id=%u result=%u final_x=%d final_y=%d "
+                         "exec_ms=%u",
+                         (unsigned long)ref_seq, (unsigned)MCU_FRAME_CLASS_MOTION, (unsigned)MCU_MOTION_MSG_MOTION_DONE,
+                         (unsigned)event->frame.payload[4], (int)decode_i16_le(&event->frame.payload[5]),
+                         (int)decode_i16_le(&event->frame.payload[7]), (unsigned)decode_u16_le(&event->frame.payload[9]));
+#endif
                 s_command_inflight = false;
             }
             return ESP_OK;

@@ -4,7 +4,14 @@
 
 #include <string.h>
 
+#if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
+#define MCU_SENSOR_STRESS_LOGGING_DISABLED 1
+#else
+#define MCU_SENSOR_STRESS_LOGGING_DISABLED 0
+#endif
+
 static const char *TAG = "MCU_SENSOR";
+static const char *OBS_TAG = "MCU_OBS";
 
 typedef struct {
     bool touch_valid;
@@ -221,8 +228,15 @@ esp_err_t mcu_sensor_service_handle_link_event(const mcu_link_event_t *event, bo
             }
             ret = mcu_sensor_service_apply_touch_impl(&state);
             if (ret == ESP_OK) {
-                ESP_LOGI(TAG, "Touch EVENT id=%u code=%u ts=%lu active=%d", (unsigned)event->frame.payload[0],
-                         (unsigned)event->frame.payload[1], (unsigned long)state.timestamp_ms, state.active ? 1 : 0);
+                if (MCU_SENSOR_STRESS_LOGGING_DISABLED == 0) {
+                    ESP_LOGI(TAG, "Touch EVENT id=%u code=%u ts=%lu active=%d", (unsigned)event->frame.payload[0],
+                             (unsigned)event->frame.payload[1], (unsigned long)state.timestamp_ms, state.active ? 1 : 0);
+                    ESP_LOGI(OBS_TAG,
+                             "evt=touch_event msg_class=%u msg_id=%u touch_id=%u code=%u timestamp_ms=%lu active=%d",
+                             (unsigned)MCU_FRAME_CLASS_SENSOR, (unsigned)MCU_SENSOR_MSG_TOUCH_EVENT,
+                             (unsigned)event->frame.payload[0], (unsigned)event->frame.payload[1],
+                             (unsigned long)state.timestamp_ms, state.active ? 1 : 0);
+                }
             }
             return ret;
         }
@@ -240,8 +254,17 @@ esp_err_t mcu_sensor_service_handle_link_event(const mcu_link_event_t *event, bo
             }
             ret = mcu_sensor_service_apply_mag_impl(&state);
             if (ret == ESP_OK) {
-                ESP_LOGD(TAG, "MAG STATE heading=%u field=%u quality=%u status=0x%02x", (unsigned)state.heading_deg_x100,
-                         (unsigned)state.field_norm_uT, (unsigned)state.quality, (unsigned)state.status_bits);
+                if (MCU_SENSOR_STRESS_LOGGING_DISABLED == 0) {
+                    ESP_LOGD(TAG, "MAG STATE heading=%u field=%u quality=%u status=0x%02x",
+                             (unsigned)state.heading_deg_x100, (unsigned)state.field_norm_uT,
+                             (unsigned)state.quality, (unsigned)state.status_bits);
+                    ESP_LOGI(OBS_TAG,
+                             "evt=mag_state msg_class=%u msg_id=%u heading_deg_x100=%u field_norm_uT=%u quality=%u "
+                             "status=0x%02x",
+                             (unsigned)MCU_FRAME_CLASS_SENSOR, (unsigned)MCU_SENSOR_MSG_MAG_STATE,
+                             (unsigned)state.heading_deg_x100, (unsigned)state.field_norm_uT, (unsigned)state.quality,
+                             (unsigned)state.status_bits);
+                }
             }
             return ret;
         }
@@ -261,8 +284,17 @@ esp_err_t mcu_sensor_service_handle_link_event(const mcu_link_event_t *event, bo
             }
             ret = mcu_sensor_service_apply_imu_impl(&state);
             if (ret == ESP_OK) {
-                ESP_LOGD(TAG, "IMU STATE roll=%d pitch=%d yaw=%d flags=0x%02x", (int)state.roll_deg_x100,
-                         (int)state.pitch_deg_x100, (int)state.yaw_deg_x100, (unsigned)state.motion_flags);
+                if (MCU_SENSOR_STRESS_LOGGING_DISABLED == 0) {
+                    ESP_LOGD(TAG, "IMU STATE roll=%d pitch=%d yaw=%d flags=0x%02x", (int)state.roll_deg_x100,
+                             (int)state.pitch_deg_x100, (int)state.yaw_deg_x100, (unsigned)state.motion_flags);
+                    ESP_LOGI(OBS_TAG,
+                             "evt=imu_state msg_class=%u msg_id=%u roll_deg_x100=%d pitch_deg_x100=%d yaw_deg_x100=%d "
+                             "acc_norm_mg=%u gyro_norm_dps_x10=%u motion_flags=0x%02x",
+                             (unsigned)MCU_FRAME_CLASS_SENSOR, (unsigned)MCU_SENSOR_MSG_IMU_STATE,
+                             (int)state.roll_deg_x100, (int)state.pitch_deg_x100, (int)state.yaw_deg_x100,
+                             (unsigned)state.acc_norm_mg, (unsigned)state.gyro_norm_dps_x10,
+                             (unsigned)state.motion_flags);
+                }
             }
             return ret;
         }

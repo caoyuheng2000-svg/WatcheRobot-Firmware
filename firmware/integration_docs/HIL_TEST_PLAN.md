@@ -67,7 +67,9 @@ ESP32 <---- UART 921600 ----> STM32
 ### 4.2 回归用例
 
 - `servo_stop_interrupt`
-- `imu_state_rate_20hz`
+- `imu_state_event_driven`
+  - 仅验证“问询触发”或“STM32 判定姿态变化事件触发”的上报路径
+  - 不作为当前标准压力场景的常开状态流
 - `mag_state_rate_2hz`
 - `coproc_reset_recovery`
 - `snapshot_restore`
@@ -93,7 +95,9 @@ ESP32 <---- UART 921600 ----> STM32
 
 ### 5.2 背压稳定性
 
-- `IMU_STATE 20Hz` 下，动作命令的 accepted 延迟保持稳定
+- 当前标准压力场景固定为 `SERVO_MOVE 5Hz + TOUCH_EVENT burst + MAG_STATE 2Hz`
+- `IMU_STATE` 不再作为本轮标准压力场景的持续上报项
+- 若后续增加姿态问询或姿态变化事件场景，则单独验证 `IMU_STATE` 的事件驱动上报延迟与正确性
 - 状态流拥塞时，`dropped_state_count` 可增长，但 `ACK/DONE/FAULT` 不应明显丢失
 
 ### 5.3 恢复能力

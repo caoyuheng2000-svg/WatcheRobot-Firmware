@@ -84,8 +84,9 @@
 ### Step 4：传感器链路
 
 - [ ] 观察 `TOUCH_EVENT`
-- [ ] 观察 `IMU_STATE`
 - [ ] 观察 `MAG_STATE`
+- [ ] 仅在“姿态问询”或“STM32 判定姿态变化事件”场景下观察 `IMU_STATE`
+- [ ] 当前标准压力场景不要求持续 `IMU_STATE` 上报
 - [ ] 检查 `latest-state-wins` 统计是否合理
 
 ### Step 5：恢复链路

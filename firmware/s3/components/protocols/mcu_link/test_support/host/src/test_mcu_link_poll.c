@@ -11,7 +11,7 @@
 
 typedef struct {
     bool ready;
-    uint8_t rx_buffer[MCU_FRAME_MAX_WIRE_SIZE * 4u];
+    uint8_t rx_buffer[MCU_FRAME_MAX_WIRE_SIZE * 16u];
     size_t rx_len;
     size_t rx_offset;
     uint8_t tx_buffer[MCU_FRAME_MAX_WIRE_SIZE];
@@ -136,6 +136,53 @@ static mcu_link_test_packet_t make_hello_rsp_packet(uint32_t seq)
     return packet;
 }
 
+static mcu_link_test_packet_t make_motion_done_packet(uint32_t seq, uint32_t ref_seq)
+{
+    mcu_frame_header_t header;
+    uint8_t payload[11] = {0};
+    mcu_link_test_packet_t packet = {0};
+
+    mcu_frame_header_init(&header, MCU_FRAME_CLASS_MOTION, MCU_MOTION_MSG_MOTION_DONE, MCU_FRAME_FLAG_FINAL, seq,
+                          sizeof(payload));
+    payload[0] = (uint8_t)(ref_seq & 0xFFu);
+    payload[1] = (uint8_t)((ref_seq >> 8u) & 0xFFu);
+    payload[2] = (uint8_t)((ref_seq >> 16u) & 0xFFu);
+    payload[3] = (uint8_t)((ref_seq >> 24u) & 0xFFu);
+    payload[4] = 0x00u;
+    payload[5] = 0x84u;
+    payload[6] = 0x03u;
+    payload[7] = 0xB0u;
+    payload[8] = 0x04u;
+    payload[9] = 0xB4u;
+    payload[10] = 0x00u;
+
+    assert(mcu_link_test_support_make_packet(&header, payload, &packet) == ESP_OK);
+    return packet;
+}
+
+static mcu_link_test_packet_t make_imu_packet(uint32_t seq)
+{
+    mcu_frame_header_t header;
+    uint8_t payload[11] = {0};
+    mcu_link_test_packet_t packet = {0};
+
+    mcu_frame_header_init(&header, MCU_FRAME_CLASS_SENSOR, MCU_SENSOR_MSG_IMU_STATE, 0u, seq, sizeof(payload));
+    payload[0] = 0x0Au;
+    payload[1] = 0x00u;
+    payload[2] = 0x9Bu;
+    payload[3] = 0x04u;
+    payload[4] = 0xB8u;
+    payload[5] = 0x0Bu;
+    payload[6] = 0xD4u;
+    payload[7] = 0x03u;
+    payload[8] = 0x78u;
+    payload[9] = 0x00u;
+    payload[10] = 0x01u;
+
+    assert(mcu_link_test_support_make_packet(&header, payload, &packet) == ESP_OK);
+    return packet;
+}
+
 static void expect_stats(const mcu_link_t *link, uint32_t crc_error_count)
 {
     mcu_link_stats_t stats = {0};
@@ -191,6 +238,46 @@ static void test_poll_keeps_second_frame_from_single_uart_read(void)
     expect_stats(&link, 0u);
 }
 
+static void test_poll_decodes_interleaved_burst_across_uart_chunks(void)
+{
+    mcu_link_t link = {0};
+    mcu_link_event_t event = {0};
+    size_t i;
+
+    fake_uart_reset();
+    assert(mcu_link_init(&link) == ESP_OK);
+    assert(mcu_link_begin_handshake(&link) == ESP_OK);
+
+    for (i = 0u; i < 8u; ++i) {
+        const mcu_link_test_packet_t ack = make_ack_packet((uint32_t)(10u + (i * 3u)), (uint32_t)(100u + i));
+        const mcu_link_test_packet_t motion_done =
+            make_motion_done_packet((uint32_t)(11u + (i * 3u)), (uint32_t)(100u + i));
+        const mcu_link_test_packet_t imu = make_imu_packet((uint32_t)(12u + (i * 3u)));
+
+        fake_uart_enqueue(ack.wire, ack.wire_len);
+        fake_uart_enqueue(motion_done.wire, motion_done.wire_len);
+        fake_uart_enqueue(imu.wire, imu.wire_len);
+    }
+
+    for (i = 0u; i < 8u; ++i) {
+        assert(mcu_link_poll(&link, &event) == ESP_OK);
+        assert(event.type == MCU_LINK_RX_EVENT_ACK);
+        assert(event.frame.header.seq == (uint32_t)(10u + (i * 3u)));
+
+        memset(&event, 0, sizeof(event));
+        assert(mcu_link_poll(&link, &event) == ESP_OK);
+        assert(event.type == MCU_LINK_RX_EVENT_MOTION_DONE);
+        assert(event.frame.header.seq == (uint32_t)(11u + (i * 3u)));
+
+        memset(&event, 0, sizeof(event));
+        assert(mcu_link_poll(&link, &event) == ESP_OK);
+        assert(event.type == MCU_LINK_RX_EVENT_IMU_STATE);
+        assert(event.frame.header.seq == (uint32_t)(12u + (i * 3u)));
+    }
+
+    expect_stats(&link, 0u);
+}
+
 int main(void)
 {
     const struct {
@@ -199,6 +286,7 @@ int main(void)
     } tests[] = {
         {"single_ack_frame", test_poll_decodes_single_ack_frame},
         {"multi_frame_single_read", test_poll_keeps_second_frame_from_single_uart_read},
+        {"interleaved_burst_across_chunks", test_poll_decodes_interleaved_burst_across_uart_chunks},
     };
     size_t i;
 
