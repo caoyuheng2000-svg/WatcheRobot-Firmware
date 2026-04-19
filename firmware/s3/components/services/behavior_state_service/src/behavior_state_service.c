@@ -1349,9 +1349,11 @@ static bool behavior_stop_current_action_locked(const char *source) {
     s_ctx.current_action_id[0] = '\0';
     s_ctx.next_action_motion_index = 0;
     s_ctx.action_started_ms = behavior_now_ms();
+#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
     if (hal_servo_cancel_all_with_source(HAL_SERVO_MOTION_SOURCE_BEHAVIOR) != ESP_OK) {
         ESP_LOGW(TAG, "Failed to cancel servo motions while interrupting action");
     }
+#endif
     return true;
 }
 
@@ -1384,6 +1386,12 @@ static void behavior_dispatch_motion_locked(const behavior_motion_event_t *event
     if (event == NULL) {
         return;
     }
+
+#if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
+    /* Stress mode owns the motion lane. Keep consuming behavior timelines so
+     * display/audio state stays alive, but never emit behavior servo traffic. */
+    return;
+#endif
 
     if (hal_servo_move_sync_with_source(event->x_deg, event->y_deg, event->duration_ms,
                                         HAL_SERVO_MOTION_SOURCE_BEHAVIOR) != ESP_OK) {
@@ -1567,9 +1575,11 @@ static esp_err_t behavior_schedule_state_locked(const char *state_id, const char
         }
 
         if (s_ctx.current_state != NULL || s_ctx.current_action != NULL) {
+#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
             if (hal_servo_cancel_all_with_source(HAL_SERVO_MOTION_SOURCE_BEHAVIOR) != ESP_OK) {
                 ESP_LOGW(TAG, "Failed to cancel servo motions before state/action switch");
             }
+#endif
         }
 
         s_ctx.current_state = NULL;
@@ -1626,9 +1636,11 @@ static esp_err_t behavior_schedule_state_locked(const char *state_id, const char
     }
 
     if (s_ctx.current_state != NULL || s_ctx.current_action != NULL) {
+#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
         if (hal_servo_cancel_all_with_source(HAL_SERVO_MOTION_SOURCE_BEHAVIOR) != ESP_OK) {
             ESP_LOGW(TAG, "Failed to cancel servo motions before state/action switch");
         }
+#endif
     }
 
     s_ctx.current_state = state_def;

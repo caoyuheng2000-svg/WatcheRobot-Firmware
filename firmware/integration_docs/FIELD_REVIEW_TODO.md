@@ -89,6 +89,13 @@
 - [ ] 当前标准压力场景不要求持续 `IMU_STATE` 上报
 - [ ] 检查 `latest-state-wins` 统计是否合理
 
+### Step 4.5：标准压力场景专项
+
+- [ ] stress build 下，确认 `behavior_state_service` 不再向舵机链路发本地 behavior motion
+- [ ] `READY` 后等待 `1s` settle，再开始标准 `SERVO_MOVE 5Hz` 压测
+- [ ] 压测收尾必须出现 `MCU_OBS evt=stress_stats reason=drain_complete`
+- [ ] `drain_complete` 中 `servo_submit_count / motion_ack_count / motion_done_count` 必须对齐
+
 ### Step 5：恢复链路
 
 - [ ] 让 STM32 复位或断连
@@ -122,3 +129,18 @@
 - [IMPLEMENTATION_STATUS.md](./IMPLEMENTATION_STATUS.md)
 - [IMPLEMENTATION_TODO.md](./IMPLEMENTATION_TODO.md)
 - [RISK_REGISTER.md](./RISK_REGISTER.md)
+
+## 6. 2026-04-19 场记
+
+本轮 no-IMU 标准压力场景已经获得一条有效通过样本：
+
+- session：`D:\GithubRep\WatcheRobot-Firmware\.codex\local\logs\50533\stm32-uart2-stress-no-imu\s3-c--stm32-c\session-20260419T053521Z`
+- 结果：`passed`
+
+这条样本对应的收口动作是：
+
+- stress build 下把 `behavior_state_service` 的 motion dispatch 改成 no-op，避免本地 behavior timeline 抢占协处理器 motion lane
+- `control_ingress` 在 stress build 下不再打断 behavior action
+- `mcu_link` runtime task 周期收紧到 `2ms`
+- stress driver 独立 task 化，并在 `READY` 后增加 `1s` settle
+- 压测结束前增加 `drain_complete` 强制统计，解决最后一笔 `MOTION_DONE` 落在采样窗外导致的假失败

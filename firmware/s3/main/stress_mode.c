@@ -29,6 +29,9 @@
 #define WATCHER_STRESS_TASK_TICK_MS 10
 #define WATCHER_STRESS_ACTIVE_DURATION_MS 595000
 #define WATCHER_STRESS_MAX_INFLIGHT 8
+#define WATCHER_STRESS_ACTIVE_WINDOW 1
+#define WATCHER_STRESS_DRIVER_TASK_PERIOD_MS 2
+#define WATCHER_STRESS_READY_SETTLE_MS 1000
 
 typedef struct {
     uint32_t servo_submit_count;
@@ -44,7 +47,6 @@ typedef struct {
     uint32_t motion_done_fault_count;
 } stress_stats_t;
 
-static TaskHandle_t s_stress_task = NULL;
 static portMUX_TYPE s_stress_lock = portMUX_INITIALIZER_UNLOCKED;
 static stress_stats_t s_stats = {0};
 static stress_stats_t s_last_logged_stats = {0};
@@ -52,6 +54,7 @@ static int64_t s_last_stats_log_us = 0;
 static bool s_waiting_for_motion_ack = false;
 static int64_t s_ready_since_us = 0;
 static int64_t s_next_submit_us = 0;
+static TaskHandle_t s_stress_task = NULL;
 typedef struct {
     uint32_t ref_seq;
     bool active;
@@ -75,6 +78,19 @@ static stress_inflight_t *stress_find_inflight(uint32_t ref_seq)
     return NULL;
 }
 
+static bool stress_has_free_inflight_slot(void)
+{
+    size_t index;
+
+    for (index = 0u; index < WATCHER_STRESS_MAX_INFLIGHT; ++index) {
+        if (!s_inflight[index].active) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 static bool stress_track_inflight(uint32_t ref_seq)
 {
     size_t index;
@@ -89,6 +105,20 @@ static bool stress_track_inflight(uint32_t ref_seq)
     }
 
     return false;
+}
+
+static size_t stress_active_inflight_count(void)
+{
+    size_t index;
+    size_t active_count = 0u;
+
+    for (index = 0u; index < WATCHER_STRESS_MAX_INFLIGHT; ++index) {
+        if (s_inflight[index].active) {
+            active_count++;
+        }
+    }
+
+    return active_count;
 }
 
 static void stress_reset_driver_state_locked(void)
@@ -132,22 +162,22 @@ static void stress_log_stats(const char *reason, bool force)
     stress_stats_t snapshot = {0};
     bool changed;
     bool periodic_due;
-    bool sampled_reason;
     int64_t now_us = esp_timer_get_time();
 
     stress_copy_stats(&snapshot);
     changed = memcmp(&snapshot, &s_last_logged_stats, sizeof(snapshot)) != 0;
     periodic_due = s_last_stats_log_us == 0 ||
                    ((now_us - s_last_stats_log_us) >= ((int64_t)WATCHER_STRESS_STATS_PERIOD_VALUE * 1000LL));
-    sampled_reason = reason != NULL &&
-                     (strcmp(reason, "submit") == 0 || strcmp(reason, "event") == 0 ||
-                      strcmp(reason, "periodic") == 0);
 
     if (!force && !changed && !periodic_due) {
         return;
     }
 
-    if (!force && sampled_reason && !periodic_due) {
+    if (!force && reason != NULL && strcmp(reason, "motion_reject") == 0) {
+        force = true;
+    }
+
+    if (!force && !periodic_due) {
         return;
     }
 
@@ -176,8 +206,17 @@ static bool stress_submit_next_servo_command(void)
         .duration_ms = 180,
     };
     uint32_t command_seq = 0u;
-    esp_err_t ret = control_ingress_submit_servo_with_seq(&request, &command_seq);
+    esp_err_t ret;
 
+    portENTER_CRITICAL(&s_stress_lock);
+    if (!stress_has_free_inflight_slot()) {
+        portEXIT_CRITICAL(&s_stress_lock);
+        ESP_LOGW(TAG, "stress inflight table full; skip submit");
+        return false;
+    }
+    portEXIT_CRITICAL(&s_stress_lock);
+
+    ret = control_ingress_submit_servo_with_seq(&request, &command_seq);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "stress servo submit failed: %s", esp_err_to_name(ret));
         return false;
@@ -196,53 +235,61 @@ static bool stress_submit_next_servo_command(void)
     return true;
 }
 
-static void stress_driver_task(void *arg)
+static void stress_drive_once(void)
+{
+    bool ready = mcu_link_bootstrap_is_ready();
+    int64_t now_us = esp_timer_get_time();
+    bool within_active_window;
+    bool due_now = false;
+    size_t active_inflight = 0u;
+
+    portENTER_CRITICAL(&s_stress_lock);
+    if (!ready) {
+        if (s_ready_since_us != 0 || s_waiting_for_motion_ack) {
+            stress_reset_driver_state_locked();
+        }
+        portEXIT_CRITICAL(&s_stress_lock);
+        return;
+    }
+
+    if (s_ready_since_us == 0) {
+        s_ready_since_us = now_us;
+        s_next_submit_us = now_us + ((int64_t)WATCHER_STRESS_READY_SETTLE_MS * 1000LL);
+    }
+
+    active_inflight = stress_active_inflight_count();
+    within_active_window = (now_us - s_ready_since_us) < ((int64_t)WATCHER_STRESS_ACTIVE_DURATION_MS * 1000LL);
+    due_now = within_active_window && active_inflight < WATCHER_STRESS_ACTIVE_WINDOW && s_next_submit_us != 0 &&
+              now_us >= s_next_submit_us;
+    portEXIT_CRITICAL(&s_stress_lock);
+
+    if (due_now && stress_submit_next_servo_command()) {
+        int64_t scheduled_next_us;
+
+        stress_log_stats("submit", false);
+        portENTER_CRITICAL(&s_stress_lock);
+        scheduled_next_us = s_next_submit_us + ((int64_t)WATCHER_STRESS_SERVO_PERIOD_VALUE * 1000LL);
+        now_us = esp_timer_get_time();
+        while (scheduled_next_us <= now_us) {
+            scheduled_next_us += ((int64_t)WATCHER_STRESS_SERVO_PERIOD_VALUE * 1000LL);
+        }
+        s_next_submit_us = scheduled_next_us;
+        portEXIT_CRITICAL(&s_stress_lock);
+    }
+}
+
+static void stress_mode_task(void *arg)
 {
     (void)arg;
-    TickType_t last_wake_ticks = xTaskGetTickCount();
 
     while (true) {
-        bool ready = mcu_link_bootstrap_is_ready();
-        int64_t now_us = esp_timer_get_time();
-        bool within_active_window;
-        bool due_now = false;
-
-        portENTER_CRITICAL(&s_stress_lock);
-        if (!ready) {
-            if (s_ready_since_us != 0 || s_waiting_for_motion_ack) {
-                stress_reset_driver_state_locked();
-            }
-            portEXIT_CRITICAL(&s_stress_lock);
-            vTaskDelayUntil(&last_wake_ticks, pdMS_TO_TICKS(WATCHER_STRESS_TASK_TICK_MS));
-            continue;
-        }
-
-        if (s_ready_since_us == 0) {
-            s_ready_since_us = now_us;
-            s_next_submit_us = now_us;
-        }
-
-        within_active_window = (now_us - s_ready_since_us) < ((int64_t)WATCHER_STRESS_ACTIVE_DURATION_MS * 1000LL);
-        due_now = within_active_window && !s_waiting_for_motion_ack && s_next_submit_us != 0 && now_us >= s_next_submit_us;
-        portEXIT_CRITICAL(&s_stress_lock);
-
-        if (due_now && stress_submit_next_servo_command()) {
-            stress_log_stats("submit", false);
-            portENTER_CRITICAL(&s_stress_lock);
-            s_next_submit_us = esp_timer_get_time() + ((int64_t)WATCHER_STRESS_SERVO_PERIOD_VALUE * 1000LL);
-            portEXIT_CRITICAL(&s_stress_lock);
-        }
-
-        vTaskDelayUntil(&last_wake_ticks, pdMS_TO_TICKS(WATCHER_STRESS_TASK_TICK_MS));
+        stress_mode_tick();
+        vTaskDelay(pdMS_TO_TICKS(WATCHER_STRESS_DRIVER_TASK_PERIOD_MS));
     }
 }
 
 void stress_mode_init(void)
 {
-    if (s_stress_task != NULL) {
-        return;
-    }
-
     memset(&s_stats, 0, sizeof(s_stats));
     memset(&s_last_logged_stats, 0, sizeof(s_last_logged_stats));
     s_last_stats_log_us = 0;
@@ -252,13 +299,19 @@ void stress_mode_init(void)
     memset(s_inflight, 0, sizeof(s_inflight));
     s_track_index = 0u;
 
-    if (xTaskCreate(stress_driver_task, "stress_servo", 4096, NULL, 5, &s_stress_task) != pdPASS) {
-        s_stress_task = NULL;
-        ESP_LOGE(TAG, "failed to create stress servo task");
+    stress_log_stats("init", true);
+}
+
+void stress_mode_start(void)
+{
+    if (s_stress_task != NULL) {
         return;
     }
 
-    stress_log_stats("init", true);
+    if (xTaskCreate(stress_mode_task, "stress_mode", 4096, NULL, 5, &s_stress_task) != pdPASS) {
+        s_stress_task = NULL;
+        ESP_LOGE(TAG, "Failed to create stress mode task");
+    }
 }
 
 void stress_mode_notify_ready(void)
@@ -270,7 +323,7 @@ void stress_mode_notify_ready(void)
         s_ready_since_us = now_us;
     }
     if (s_next_submit_us == 0 || s_next_submit_us > now_us) {
-        s_next_submit_us = now_us;
+        s_next_submit_us = now_us + ((int64_t)WATCHER_STRESS_READY_SETTLE_MS * 1000LL);
     }
     portEXIT_CRITICAL(&s_stress_lock);
 }
@@ -279,7 +332,9 @@ void stress_mode_on_link_event(const mcu_link_event_t *event)
 {
     uint32_t ref_seq = 0u;
     stress_inflight_t *entry = NULL;
-    bool log_event = false;
+    const char *log_reason = NULL;
+    bool log_drain_complete = false;
+    int64_t now_us = esp_timer_get_time();
 
     if (event == NULL) {
         return;
@@ -308,8 +363,7 @@ void stress_mode_on_link_event(const mcu_link_event_t *event)
         if (entry != NULL && entry->awaiting_ack) {
             s_stats.motion_ack_count++;
             entry->awaiting_ack = false;
-            s_waiting_for_motion_ack = false;
-            log_event = true;
+            log_reason = "motion_ack";
         }
         break;
     case MCU_LINK_RX_EVENT_NACK:
@@ -318,15 +372,21 @@ void stress_mode_on_link_event(const mcu_link_event_t *event)
             s_waiting_for_motion_ack = false;
             entry->active = false;
             entry->awaiting_ack = false;
-            log_event = true;
+            log_reason = "motion_reject";
         }
         break;
     case MCU_LINK_RX_EVENT_MOTION_DONE:
         if (entry != NULL) {
             s_stats.motion_done_count++;
+            s_waiting_for_motion_ack = false;
             entry->active = false;
             entry->awaiting_ack = false;
-            log_event = true;
+            log_reason = "motion_done";
+            if (s_ready_since_us != 0 &&
+                (now_us - s_ready_since_us) >= ((int64_t)WATCHER_STRESS_ACTIVE_DURATION_MS * 1000LL) &&
+                stress_active_inflight_count() == 0u) {
+                log_drain_complete = true;
+            }
         }
         break;
     case MCU_LINK_RX_EVENT_TOUCH_EVENT:
@@ -343,13 +403,17 @@ void stress_mode_on_link_event(const mcu_link_event_t *event)
     }
     portEXIT_CRITICAL(&s_stress_lock);
 
-    if (log_event) {
-        stress_log_stats("event", false);
+    if (log_reason != NULL) {
+        stress_log_stats(log_reason, false);
+    }
+    if (log_drain_complete) {
+        stress_log_stats("drain_complete", true);
     }
 }
 
 void stress_mode_tick(void)
 {
+    stress_drive_once();
     stress_log_stats("periodic", false);
 }
 
@@ -365,6 +429,10 @@ void stress_mode_on_link_event(const mcu_link_event_t *event)
 }
 
 void stress_mode_notify_ready(void)
+{
+}
+
+void stress_mode_start(void)
 {
 }
 
