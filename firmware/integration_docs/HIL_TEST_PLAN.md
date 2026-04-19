@@ -98,6 +98,9 @@ ESP32 <---- UART 921600 ----> STM32
 - 当前标准压力场景固定为 `SERVO_MOVE 5Hz + TOUCH_EVENT burst + MAG_STATE 2Hz`
 - `IMU_STATE` 不再作为本轮标准压力场景的持续上报项
 - 若后续增加姿态问询或姿态变化事件场景，则单独验证 `IMU_STATE` 的事件驱动上报延迟与正确性
+- stress build 下，`behavior_state_service` 只保留显示/音频状态推进，不再向舵机链路发本地 behavior motion
+- stress build 在 `READY` 后额外预留 `1s` settle 窗口，再开始第一笔 `SERVO_MOVE`
+- 标准压力场景在主动发送窗口结束后，必须输出一次 `MCU_OBS evt=stress_stats reason=drain_complete`，用于收尾对齐 `submit / ack / done`
 - 状态流拥塞时，`dropped_state_count` 可增长，但 `ACK/DONE/FAULT` 不应明显丢失
 
 ### 5.3 恢复能力
@@ -142,3 +145,22 @@ HIL 日志输出中不得只写“失败”，必须带可定位字段。
 - BLE / WS 端到端云联调
 - STM32 固件升级联调
 - 视觉协处理器链路
+
+## 10. 当前已验证基线
+
+截至 `2026-04-19`，当前 no-IMU 标准压力场景的最新有效通过样本为：
+
+- session：`D:\GithubRep\WatcheRobot-Firmware\.codex\local\logs\50533\stm32-uart2-stress-no-imu\s3-c--stm32-c\session-20260419T053521Z`
+- 结果：`stress_standard -> passed`
+
+关键指标：
+
+- `servo_submit_count=2969`
+- `motion_ack_count=2969`
+- `motion_done_count=2969`
+- `touch_rx_count=1186`
+- `mag_rx_count=1187`
+- `ack_timeout_count=0`
+- `crc_error_count=0`
+- `motion_done_fault_count=0`
+- `reconnect_count=0`

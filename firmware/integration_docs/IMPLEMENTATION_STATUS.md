@@ -4,9 +4,9 @@
 
 ## 1. 状态快照
 
-- 日期：`2026-04-15`
+- 日期：`2026-04-19`
 - 集成分支：`v2.0.0-refactor`
-- 当前阶段：`ESP32 运行时链路已具备 live frame -> service 分发，准备切入真实 STM32 串口 bring-up`
+- 当前阶段：`no-IMU 标准 stress build 已通过 10 分钟双 MCU HIL，进入结果固化与 commit 阶段`
 - 当前板级串口：`COM28`
 
 ## 2. 已完成
@@ -93,6 +93,7 @@
 - `git diff --check`
 - `COM28` 刷写成功
 - `COM28` 启动 smoke 成功
+- `stress_standard (no-IMU)` 10 分钟双 MCU HIL 通过
 
 关键板级日志样本：
 
@@ -107,6 +108,22 @@
 - 未发现 `Guru Meditation`
 - `i2s_channel_disable` 仍然存在，但属于已知既有噪声，不是本轮协处理器改动引入
 
+最新有效 pressure session：
+
+- `D:\GithubRep\WatcheRobot-Firmware\.codex\local\logs\50533\stm32-uart2-stress-no-imu\s3-c--stm32-c\session-20260419T053521Z`
+
+该 session 确认：
+
+- `servo_submit_count=2969`
+- `motion_ack_count=2969`
+- `motion_done_count=2969`
+- `touch_rx_count=1186`
+- `mag_rx_count=1187`
+- `ack_timeout_count=0`
+- `crc_error_count=0`
+- `motion_done_fault_count=0`
+- `reconnect_count=0`
+
 ## 3. 当前未完成
 
 以下项目仍未进入“已实现”状态：
@@ -114,6 +131,12 @@
 - `HELLO_RSP -> READY` 当前已改成 app 层显式 safe-default helper，但仍未替换成正式的 baseline restore 流程
 - `BLE / WS / control_ingress / behavior_state_service` 仍未完成全链路切换
 - 基于真实 STM32 的 UART 闭环联调尚未开始
+
+补充说明：
+
+- stress build 下，`behavior_state_service` 的 motion dispatch 已被有意屏蔽，目的是避免本地 behavior timeline 干扰压测流量；这不是常规业务模式的最终语义
+- stress build 下，`control_ingress` 不再打断 behavior action，motion lane 由 stress driver 独占
+- 标准压力场景的计数闭环依赖 `drain_complete` 结构化日志，不再用“最后一条 periodic stats”作为唯一收尾统计
 
 ## 4. 当前阶段判断
 

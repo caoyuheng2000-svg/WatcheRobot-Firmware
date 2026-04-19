@@ -67,7 +67,7 @@
 #define CLOUD_RUNTIME_MIN_INTERNAL_LARGEST_BYTES (12U * 1024U)
 #if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
 #define MCU_LINK_RUNTIME_MAX_EVENTS_PER_TICK 64
-#define MCU_LINK_RUNTIME_TASK_PERIOD_MS 5
+#define MCU_LINK_RUNTIME_TASK_PERIOD_MS 2
 #define MAIN_LOOP_DELAY_MS 10
 #else
 #define MCU_LINK_RUNTIME_MAX_EVENTS_PER_TICK 4
@@ -1629,13 +1629,26 @@ void app_main(void) {
     /* 5. Initialize app state only. Input devices stay disabled during BLE provisioning. */
     boot_anim_set_progress(30);
     boot_anim_set_text("State...");
+#if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
+    if (control_ingress_init() != ESP_OK) {
+        ESP_LOGE(TAG, "Control ingress init failed");
+        boot_halt_with_error("Control init failed");
+    }
+    stress_mode_start();
+    if (mcu_link_bootstrap_is_ready()) {
+        stress_mode_notify_ready();
+    }
+    LOG_HEAP_STATE("after_control_ingress");
+#endif
     behavior_state_init();
 
+#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
     if (control_ingress_init() != ESP_OK) {
         ESP_LOGE(TAG, "Control ingress init failed");
         boot_halt_with_error("Control init failed");
     }
     LOG_HEAP_STATE("after_control_ingress");
+#endif
 
     /* 5.5 BLE control + provisioning */
     boot_anim_set_progress(35);
@@ -1711,7 +1724,9 @@ void app_main(void) {
         maybe_play_ble_connected_feedback();
         apply_idle_hint_if_needed();
         ws_tts_timeout_check();
+#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
         stress_mode_tick();
+#endif
         vTaskDelay(pdMS_TO_TICKS(MAIN_LOOP_DELAY_MS));
     }
 }

@@ -10,6 +10,7 @@ extern "C" {
 void stress_mode_init(void);
 void stress_mode_on_link_event(const mcu_link_event_t *event);
 void stress_mode_notify_ready(void);
+void stress_mode_start(void);
 void stress_mode_tick(void);
 
 #ifdef __cplusplus

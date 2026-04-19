@@ -315,8 +315,6 @@ esp_err_t control_ingress_submit_servo(const control_servo_request_t *req) {
 }
 
 esp_err_t control_ingress_submit_servo_with_seq(const control_servo_request_t *req, uint32_t *out_seq) {
-    esp_err_t interrupt_ret;
-
     if (req == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -333,10 +331,14 @@ esp_err_t control_ingress_submit_servo_with_seq(const control_servo_request_t *r
         return ESP_ERR_INVALID_ARG;
     }
 
+#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
+    esp_err_t interrupt_ret;
+
     interrupt_ret = behavior_state_interrupt_action("control_ingress_servo");
     if (interrupt_ret != ESP_OK && interrupt_ret != ESP_ERR_NOT_FOUND) {
         ESP_LOGW(TAG, "Failed to interrupt action loop before servo control: %s", esp_err_to_name(interrupt_ret));
     }
+#endif
 
     if (req->has_x && req->has_y) {
         return hal_servo_move_sync_with_source_and_seq(req->x_deg, req->y_deg, req->duration_ms,
