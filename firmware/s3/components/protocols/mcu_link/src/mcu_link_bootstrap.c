@@ -9,6 +9,7 @@
 #include <string.h>
 
 static const char *TAG = "MCU_LINK_BOOT";
+static const char *OBS_TAG = "MCU_OBS";
 static const int64_t HELLO_RETRY_INTERVAL_US = 1000LL * 1000LL;
 
 static mcu_link_t s_link;
@@ -30,6 +31,9 @@ static esp_err_t mcu_link_bootstrap_send_hello_req(void)
     s_last_hello_req_us = esp_timer_get_time();
     ESP_LOGI(TAG, "MCU link hello request queued (seq=%lu wire_len=%u state=%d)", (unsigned long)seq,
              (unsigned)wire_len, (int)mcu_link_get_state(&s_link));
+    ESP_LOGI(OBS_TAG, "evt=hello_req seq=%lu msg_class=%u msg_id=%u link_state=%d",
+             (unsigned long)seq, (unsigned)MCU_FRAME_CLASS_SYS, (unsigned)MCU_SYS_MSG_HELLO_REQ,
+             (int)mcu_link_get_state(&s_link));
     return ESP_OK;
 }
 
