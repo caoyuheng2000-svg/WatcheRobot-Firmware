@@ -460,9 +460,8 @@ static void sfx_playback_file(const char *sound_id, uint32_t generation) {
         if (handoff_to_cloud_audio) {
             ESP_LOGI(TAG, "Handing off audio path from local sfx '%s' to cloud audio", sound_id);
         } else {
-            hal_audio_stop();
             hal_audio_set_playback_mode(false);
-            hal_audio_set_sample_rate(16000);
+            hal_audio_stop();
         }
     }
     mem_monitor_snapshot("after_sfx_playback");

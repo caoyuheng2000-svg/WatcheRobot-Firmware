@@ -311,8 +311,10 @@ esp_err_t control_ingress_init(void) {
 }
 
 esp_err_t control_ingress_submit_servo(const control_servo_request_t *req) {
-    esp_err_t interrupt_ret;
+    return control_ingress_submit_servo_with_seq(req, NULL);
+}
 
+esp_err_t control_ingress_submit_servo_with_seq(const control_servo_request_t *req, uint32_t *out_seq) {
     if (req == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -329,17 +331,25 @@ esp_err_t control_ingress_submit_servo(const control_servo_request_t *req) {
         return ESP_ERR_INVALID_ARG;
     }
 
+#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
+    esp_err_t interrupt_ret;
+
     interrupt_ret = behavior_state_interrupt_action("control_ingress_servo");
     if (interrupt_ret != ESP_OK && interrupt_ret != ESP_ERR_NOT_FOUND) {
         ESP_LOGW(TAG, "Failed to interrupt action loop before servo control: %s", esp_err_to_name(interrupt_ret));
     }
+#endif
 
     if (req->has_x && req->has_y) {
-        return hal_servo_move_sync(req->x_deg, req->y_deg, req->duration_ms);
+        return hal_servo_move_sync_with_source_and_seq(req->x_deg, req->y_deg, req->duration_ms,
+                                                       HAL_SERVO_MOTION_SOURCE_UNKNOWN, out_seq);
     }
 
-    return hal_servo_move_smooth(req->has_x ? SERVO_AXIS_X : SERVO_AXIS_Y, req->has_x ? req->x_deg : req->y_deg,
-                                 req->duration_ms);
+    return hal_servo_move_smooth_with_source_and_seq(req->has_x ? SERVO_AXIS_X : SERVO_AXIS_Y,
+                                                     req->has_x ? req->x_deg : req->y_deg,
+                                                     req->duration_ms,
+                                                     HAL_SERVO_MOTION_SOURCE_UNKNOWN,
+                                                     out_seq);
 }
 
 esp_err_t control_ingress_submit_ai_status(const control_ai_status_request_t *req) {
