@@ -1,0 +1,73 @@
+menu "Watcher Voice Service"
+
+    config WATCHER_ENABLE_WAKE_WORD
+        bool "Enable local wake word detection"
+        default y
+        depends on IDF_TARGET_ESP32S3 && SPIRAM && USE_WAKENET
+        help
+            Enable offline wake word detection using Espressif ESP-SR AFE and
+            the selected WakeNet model. Audio stays at 16 kHz while idle so the
+            detector can run continuously.
+
+    if WATCHER_ENABLE_WAKE_WORD
+
+    config WATCHER_WAKE_WORD_HIGH_PERF_MODE
+        bool "Use high performance AFE mode"
+        default n
+        help
+            Use SR_MODE_HIGH_PERF instead of SR_MODE_LOW_COST. This can improve
+            detection robustness but increases CPU and memory pressure.
+
+    config WATCHER_WAKE_WORD_SENSITIVE_MODE
+        bool "Use sensitive WakeNet threshold"
+        default n
+        help
+            Use DET_MODE_95 instead of DET_MODE_90. This is more sensitive and
+            may increase false wakeups.
+
+    config WATCHER_WAKE_WORD_TASK_STACK_SIZE
+        int "Wake word detection task stack size"
+        range 3072 8192
+        default 4096
+
+    config WATCHER_WAKE_WORD_TASK_PRIORITY
+        int "Wake word detection task priority"
+        range 3 10
+        default 6
+
+    config WATCHER_WAKE_WORD_AFE_CORE
+        int "AFE preferred core"
+        range 0 1
+        default 1
+
+    config WATCHER_WAKE_WORD_AFE_PRIORITY
+        int "AFE preferred priority"
+        range 1 10
+        default 3
+
+    config WATCHER_WAKE_WORD_AFE_RINGBUF_SIZE
+        int "AFE ring buffer size"
+        range 10 100
+        default 50
+
+    config WATCHER_VAD_SILENCE_TIMEOUT_MS
+        int "VAD silence timeout after wake word (ms)"
+        range 0 10000
+        default 1200
+        help
+            Stop wake-word-triggered recording after this much silence. Set to
+            0 to disable automatic silence stop.
+
+    config WATCHER_VAD_RMS_THRESHOLD
+        int "VAD RMS threshold"
+        range 50 5000
+        default 450
+
+    config WATCHER_VAD_MIN_SPEECH_MS
+        int "VAD minimum speech duration (ms)"
+        range 0 5000
+        default 600
+
+    endif
+
+endmenu
