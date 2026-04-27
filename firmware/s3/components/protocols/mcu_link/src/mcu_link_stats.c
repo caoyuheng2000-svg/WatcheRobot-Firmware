@@ -3,8 +3,7 @@
 #include <limits.h>
 #include <string.h>
 
-static void increment_counter(uint32_t *counter)
-{
+static void increment_counter(uint32_t *counter) {
     if (counter == NULL) {
         return;
     }
@@ -14,8 +13,7 @@ static void increment_counter(uint32_t *counter)
     }
 }
 
-void mcu_link_stats_init(mcu_link_stats_t *stats)
-{
+void mcu_link_stats_init(mcu_link_stats_t *stats) {
     if (stats == NULL) {
         return;
     }
@@ -23,13 +21,11 @@ void mcu_link_stats_init(mcu_link_stats_t *stats)
     memset(stats, 0, sizeof(*stats));
 }
 
-void mcu_link_stats_reset(mcu_link_stats_t *stats)
-{
+void mcu_link_stats_reset(mcu_link_stats_t *stats) {
     mcu_link_stats_init(stats);
 }
 
-void mcu_link_stats_record_ack_timeout(mcu_link_stats_t *stats)
-{
+void mcu_link_stats_record_ack_timeout(mcu_link_stats_t *stats) {
     if (stats == NULL) {
         return;
     }
@@ -37,8 +33,7 @@ void mcu_link_stats_record_ack_timeout(mcu_link_stats_t *stats)
     increment_counter(&stats->ack_timeout_count);
 }
 
-void mcu_link_stats_record_crc_error(mcu_link_stats_t *stats)
-{
+void mcu_link_stats_record_crc_error(mcu_link_stats_t *stats) {
     if (stats == NULL) {
         return;
     }
@@ -46,8 +41,7 @@ void mcu_link_stats_record_crc_error(mcu_link_stats_t *stats)
     increment_counter(&stats->crc_error_count);
 }
 
-void mcu_link_stats_record_reconnect(mcu_link_stats_t *stats)
-{
+void mcu_link_stats_record_reconnect(mcu_link_stats_t *stats) {
     if (stats == NULL) {
         return;
     }
@@ -55,8 +49,7 @@ void mcu_link_stats_record_reconnect(mcu_link_stats_t *stats)
     increment_counter(&stats->reconnect_count);
 }
 
-void mcu_link_stats_record_dropped_state(mcu_link_stats_t *stats)
-{
+void mcu_link_stats_record_dropped_state(mcu_link_stats_t *stats) {
     if (stats == NULL) {
         return;
     }
@@ -64,8 +57,7 @@ void mcu_link_stats_record_dropped_state(mcu_link_stats_t *stats)
     increment_counter(&stats->dropped_state_count);
 }
 
-void mcu_link_stats_record_motion_done_fault(mcu_link_stats_t *stats)
-{
+void mcu_link_stats_record_motion_done_fault(mcu_link_stats_t *stats) {
     if (stats == NULL) {
         return;
     }
@@ -73,8 +65,7 @@ void mcu_link_stats_record_motion_done_fault(mcu_link_stats_t *stats)
     increment_counter(&stats->motion_done_fault_count);
 }
 
-void mcu_link_stats_accumulate(mcu_link_stats_t *dst, const mcu_link_stats_t *src)
-{
+void mcu_link_stats_accumulate(mcu_link_stats_t *dst, const mcu_link_stats_t *src) {
     if (dst == NULL || src == NULL) {
         return;
     }
@@ -101,8 +92,7 @@ void mcu_link_stats_accumulate(mcu_link_stats_t *dst, const mcu_link_stats_t *sr
     }
 }
 
-void mcu_link_stats_copy(mcu_link_stats_t *dst, const mcu_link_stats_t *src)
-{
+void mcu_link_stats_copy(mcu_link_stats_t *dst, const mcu_link_stats_t *src) {
     if (dst == NULL || src == NULL) {
         return;
     }

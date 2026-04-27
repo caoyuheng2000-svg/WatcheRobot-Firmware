@@ -1,12 +1,10 @@
 #include "mcu_link_fsm.h"
 
-static bool is_link_ready_state(mcu_link_state_t state)
-{
+static bool is_link_ready_state(mcu_link_state_t state) {
     return state == MCU_LINK_STATE_LINK_READY || state == MCU_LINK_STATE_READY;
 }
 
-esp_err_t mcu_link_fsm_init(mcu_link_fsm_t *fsm)
-{
+esp_err_t mcu_link_fsm_init(mcu_link_fsm_t *fsm) {
     if (fsm == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -18,8 +16,7 @@ esp_err_t mcu_link_fsm_init(mcu_link_fsm_t *fsm)
     return ESP_OK;
 }
 
-esp_err_t mcu_link_fsm_begin_handshake(mcu_link_fsm_t *fsm)
-{
+esp_err_t mcu_link_fsm_begin_handshake(mcu_link_fsm_t *fsm) {
     if (fsm == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -30,8 +27,7 @@ esp_err_t mcu_link_fsm_begin_handshake(mcu_link_fsm_t *fsm)
     return ESP_OK;
 }
 
-esp_err_t mcu_link_fsm_on_hello_rsp(mcu_link_fsm_t *fsm, bool snapshot_supported)
-{
+esp_err_t mcu_link_fsm_on_hello_rsp(mcu_link_fsm_t *fsm, bool snapshot_supported) {
     if (fsm == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -42,8 +38,7 @@ esp_err_t mcu_link_fsm_on_hello_rsp(mcu_link_fsm_t *fsm, bool snapshot_supported
     return ESP_OK;
 }
 
-esp_err_t mcu_link_fsm_mark_baseline_synced(mcu_link_fsm_t *fsm)
-{
+esp_err_t mcu_link_fsm_mark_baseline_synced(mcu_link_fsm_t *fsm) {
     if (fsm == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -57,8 +52,7 @@ esp_err_t mcu_link_fsm_mark_baseline_synced(mcu_link_fsm_t *fsm)
     return ESP_OK;
 }
 
-esp_err_t mcu_link_fsm_mark_degraded(mcu_link_fsm_t *fsm)
-{
+esp_err_t mcu_link_fsm_mark_degraded(mcu_link_fsm_t *fsm) {
     if (fsm == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -68,8 +62,7 @@ esp_err_t mcu_link_fsm_mark_degraded(mcu_link_fsm_t *fsm)
     return ESP_OK;
 }
 
-esp_err_t mcu_link_fsm_begin_recovery(mcu_link_fsm_t *fsm)
-{
+esp_err_t mcu_link_fsm_begin_recovery(mcu_link_fsm_t *fsm) {
     if (fsm == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -80,8 +73,7 @@ esp_err_t mcu_link_fsm_begin_recovery(mcu_link_fsm_t *fsm)
     return ESP_OK;
 }
 
-mcu_link_state_t mcu_link_fsm_get_state(const mcu_link_fsm_t *fsm)
-{
+mcu_link_state_t mcu_link_fsm_get_state(const mcu_link_fsm_t *fsm) {
     if (fsm == NULL) {
         return MCU_LINK_STATE_DOWN;
     }
@@ -89,12 +81,10 @@ mcu_link_state_t mcu_link_fsm_get_state(const mcu_link_fsm_t *fsm)
     return fsm->state;
 }
 
-bool mcu_link_fsm_is_link_ready(const mcu_link_fsm_t *fsm)
-{
+bool mcu_link_fsm_is_link_ready(const mcu_link_fsm_t *fsm) {
     return fsm != NULL && is_link_ready_state(fsm->state);
 }
 
-bool mcu_link_fsm_is_ready(const mcu_link_fsm_t *fsm)
-{
+bool mcu_link_fsm_is_ready(const mcu_link_fsm_t *fsm) {
     return fsm != NULL && fsm->state == MCU_LINK_STATE_READY && fsm->baseline_synced;
 }

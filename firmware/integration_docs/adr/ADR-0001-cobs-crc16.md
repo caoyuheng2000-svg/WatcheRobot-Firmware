@@ -40,4 +40,4 @@ Accepted
 ## Related
 
 - `../STM32_UART_PROTOCOL.md`
-- `../TDD_EXECUTION_PLAN.md`
+- `../HIL_TEST_PLAN.md`

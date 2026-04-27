@@ -4,37 +4,28 @@
 
 #include <string.h>
 
-static void write_u16_le(uint8_t *dst, uint16_t value)
-{
+static void write_u16_le(uint8_t *dst, uint16_t value) {
     dst[0] = (uint8_t)(value & 0xFFu);
     dst[1] = (uint8_t)((value >> 8) & 0xFFu);
 }
 
-static void write_u32_le(uint8_t *dst, uint32_t value)
-{
+static void write_u32_le(uint8_t *dst, uint32_t value) {
     dst[0] = (uint8_t)(value & 0xFFu);
     dst[1] = (uint8_t)((value >> 8) & 0xFFu);
     dst[2] = (uint8_t)((value >> 16) & 0xFFu);
     dst[3] = (uint8_t)((value >> 24) & 0xFFu);
 }
 
-static uint16_t read_u16_le(const uint8_t *src)
-{
+static uint16_t read_u16_le(const uint8_t *src) {
     return (uint16_t)((uint16_t)src[0] | ((uint16_t)src[1] << 8));
 }
 
-static uint32_t read_u32_le(const uint8_t *src)
-{
+static uint32_t read_u32_le(const uint8_t *src) {
     return (uint32_t)src[0] | ((uint32_t)src[1] << 8) | ((uint32_t)src[2] << 16) | ((uint32_t)src[3] << 24);
 }
 
-void mcu_frame_header_init(mcu_frame_header_t *header,
-                           uint8_t msg_class,
-                           uint8_t msg_id,
-                           uint8_t flags,
-                           uint32_t seq,
-                           uint16_t payload_len)
-{
+void mcu_frame_header_init(mcu_frame_header_t *header, uint8_t msg_class, uint8_t msg_id, uint8_t flags, uint32_t seq,
+                           uint16_t payload_len) {
     if (header == NULL) {
         return;
     }
@@ -49,8 +40,7 @@ void mcu_frame_header_init(mcu_frame_header_t *header,
     header->payload_len = payload_len;
 }
 
-bool mcu_frame_header_is_valid(const mcu_frame_header_t *header)
-{
+bool mcu_frame_header_is_valid(const mcu_frame_header_t *header) {
     if (header == NULL) {
         return false;
     }
@@ -66,8 +56,7 @@ bool mcu_frame_header_is_valid(const mcu_frame_header_t *header)
     return header->payload_len <= MCU_FRAME_MAX_PAYLOAD_SIZE;
 }
 
-uint16_t mcu_frame_compute_crc(const mcu_frame_header_t *header, const uint8_t *payload)
-{
+uint16_t mcu_frame_compute_crc(const mcu_frame_header_t *header, const uint8_t *payload) {
     if (header == NULL || (header->payload_len > 0u && payload == NULL)) {
         return 0u;
     }
@@ -94,12 +83,8 @@ uint16_t mcu_frame_compute_crc(const mcu_frame_header_t *header, const uint8_t *
     return crc;
 }
 
-esp_err_t mcu_frame_pack(const mcu_frame_header_t *header,
-                         const uint8_t *payload,
-                         uint8_t *buffer,
-                         size_t buffer_len,
-                         size_t *encoded_len)
-{
+esp_err_t mcu_frame_pack(const mcu_frame_header_t *header, const uint8_t *payload, uint8_t *buffer, size_t buffer_len,
+                         size_t *encoded_len) {
     if (header == NULL || buffer == NULL || encoded_len == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -142,11 +127,7 @@ esp_err_t mcu_frame_pack(const mcu_frame_header_t *header,
     return ESP_OK;
 }
 
-esp_err_t mcu_frame_unpack(const uint8_t *buffer,
-                           size_t buffer_len,
-                           mcu_frame_t *frame,
-                           size_t *payload_len)
-{
+esp_err_t mcu_frame_unpack(const uint8_t *buffer, size_t buffer_len, mcu_frame_t *frame, size_t *payload_len) {
     if (buffer == NULL || frame == NULL || payload_len == NULL) {
         return ESP_ERR_INVALID_ARG;
     }

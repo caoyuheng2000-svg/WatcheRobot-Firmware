@@ -104,23 +104,13 @@ typedef struct {
     uint8_t payload[MCU_FRAME_MAX_PAYLOAD_SIZE];
 } mcu_frame_t;
 
-void mcu_frame_header_init(mcu_frame_header_t *header,
-                           uint8_t msg_class,
-                           uint8_t msg_id,
-                           uint8_t flags,
-                           uint32_t seq,
+void mcu_frame_header_init(mcu_frame_header_t *header, uint8_t msg_class, uint8_t msg_id, uint8_t flags, uint32_t seq,
                            uint16_t payload_len);
 bool mcu_frame_header_is_valid(const mcu_frame_header_t *header);
 uint16_t mcu_frame_compute_crc(const mcu_frame_header_t *header, const uint8_t *payload);
-esp_err_t mcu_frame_pack(const mcu_frame_header_t *header,
-                         const uint8_t *payload,
-                         uint8_t *buffer,
-                         size_t buffer_len,
+esp_err_t mcu_frame_pack(const mcu_frame_header_t *header, const uint8_t *payload, uint8_t *buffer, size_t buffer_len,
                          size_t *encoded_len);
-esp_err_t mcu_frame_unpack(const uint8_t *buffer,
-                           size_t buffer_len,
-                           mcu_frame_t *frame,
-                           size_t *payload_len);
+esp_err_t mcu_frame_unpack(const uint8_t *buffer, size_t buffer_len, mcu_frame_t *frame, size_t *payload_len);
 
 #ifdef __cplusplus
 }

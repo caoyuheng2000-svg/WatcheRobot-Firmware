@@ -1,204 +1,70 @@
 # v2.0.0 当前实现状态
 
-> 目的：记录 `v2.0.0-refactor` 当前已经实际落地到哪一步，避免把“文档已冻结”和“代码已实现”混为一谈。
+> 目的：记录 `v2.0.0-refactor` 的实际代码状态、验证结果和主分支合入状态。
 
-## 1. 状态快照
+## 状态快照
 
-- 日期：`2026-04-19`
+- 日期：`2026-04-28`
 - 集成分支：`v2.0.0-refactor`
-- 当前阶段：`no-IMU 标准 stress build 已通过 10 分钟双 MCU HIL，进入结果固化与 commit 阶段`
-- 当前板级串口：`COM28`
+- 当前分支头：`77f68a1 style: fix v2 integration doc whitespace`
+- 主分支状态：`main` 已通过 `e048fff` 撤回 `f7cab6a merge: integrate ESP32 v2.0.0 refactor`
+- 当前判断：ESP32 侧 V2 协处理器重构可以编译通过，但需要完成文档收口和合并流程复核后再重新合入主分支。
 
-## 2. 已完成
-
-### 2.0 POWER 协议补充
-
-- `POWER_5V_ENABLE / POWER_5V_DISABLE` 已加入 ESP32/STM32 协处理器协议枚举与构帧/解析路径。
-- 当前硬件判据已澄清：ESP32 由 USB-C 5V 供电，POWER 通路只控制 STM32 侧舵机和 WS2812 LED 的 5V 外设电源。
-- 2026-04-27 双端串口 smoke 已确认：
-  - ESP32 当前分支固件可启动并进入 `MCU_OBS evt=ready link_state=READY`
-  - STM32 `COM56` CLI 可执行 `ip5306_on / ip5306_off / ip5306_long / ip5306_irq`
-  - `ip5306_off` 后 ESP32 `COM37` 日志继续输出符合供电拓扑预期，不作为 POWER disable 失败判据
-
-### 2.1 文档基线
-
-以下文档已冻结并作为当前实现依据：
-
-- [STM32_COPROC_REFACTOR_PLAN.md](./STM32_COPROC_REFACTOR_PLAN.md)
-- [STM32_UART_PROTOCOL.md](./STM32_UART_PROTOCOL.md)
-- [TDD_EXECUTION_PLAN.md](./TDD_EXECUTION_PLAN.md)
-- [RISK_REGISTER.md](./RISK_REGISTER.md)
-- [HIL_TEST_PLAN.md](./HIL_TEST_PLAN.md)
-- [BRANCH_WORKTREE_PLAN.md](./BRANCH_WORKTREE_PLAN.md)
-
-### 2.2 关键实现提交
-
-当前阶段的关键实现提交包括：
-
-- `5fccecc`
-  - 稳定 ESP32 音频路径并恢复板级启动 smoke
-- `9af402d`
-  - 增加 `mcu_link` 可配置 UART scaffold
-- `8b134c6`
-  - 增加 `mcu_link` 的 `HELLO_REQ` bootstrap runtime path
-- `e4a650a`
-  - `mcu_motion_service` 在 `mcu_link` ready 时镜像下发 `SERVO_MOVE / SERVO_STOP`
-- `b778b2c`
-  - `GPIO19/20` 切到 `mcu_link` 运行时 UART，本地 `hal_servo` PWM 后端退场
-- `eece532`
-  - `mcu_link` 增加最小 RX/poll 路径，处理 `HELLO_RSP / ACK / NACK / FAULT`
-- `d46a7ee`
-  - `mcu_led_service` 通过 `mcu_link` 实际构帧下发 `LED` 类消息
-- `28bc162`
-  - `mcu_sensor_service` 接入 `touch / imu / mag` 缓存与 `latest-state-wins`
-- `working tree (to be committed with this status sync)`
-  - 主循环已持续调用 `mcu_link_bootstrap_poll()`
-  - `mcu_motion_service / mcu_led_service` 已改成仅在 `READY` 后放行业务帧
-  - `hal_servo_init()` 失败已升级为启动期致命错误
-  - `mcu_link` 已能把 `ACK / NACK / FAULT / MOTION_DONE / LED_DONE / TOUCH_EVENT / MAG_STATE / IMU_STATE` 分发到 service
-  - `HELLO_RSP -> READY` 已从 bootstrap 隐式推进改成 app 层显式 safe-default baseline helper
-
-### 2.3 ESP32 已落地内容
+## 已落地能力
 
 - `mcu_link`
-  - 已有 `CRC16 / COBS / frame / wire / FSM / stats` 骨架
-  - 已有最小 UART transport scaffold
-  - 已有 `HELLO_REQ` bootstrap 发送路径
-  - 已有 `mcu_link_poll()` / `mcu_link_bootstrap_poll()`
-  - 已由主循环持续驱动 `mcu_link_bootstrap_poll()`，不再停留在“只在启动时发一次 `HELLO_REQ`”
-  - 已可解 `HELLO_RSP / ACK / NACK / FAULT`
-  - 已有最小 `HELLO_REQ` 重试与事件日志路径
-  - 已可产出 `SNAPSHOT_RSP / MOTION_DONE / LED_DONE / TOUCH_EVENT / MAG_STATE / IMU_STATE` 事件
-- `mcu_motion_service`
-  - 已从“仅缓存请求”推进到“链路进入 `READY` 时镜像下发 `SERVO_MOVE / SERVO_STOP`”
-  - `link` 缺失或未 ready 时已返回显式错误，不再“假成功”
-  - 已能消费 `ACK / NACK / FAULT / MOTION_DONE`
-- `mcu_led_service`
-  - 已支持 `MCU_LED_MODE_STATIC / EFFECT / OFF` 构帧并通过 `mcu_link` 下发
-  - `link` 未 ready 时已返回显式错误，不再把未发送请求当作 accepted
-  - 已能消费 `ACK / NACK / FAULT / LED_DONE`
+  - 已实现 `CRC16 / COBS / frame / wire / FSM / stats` 基础能力。
+  - 已接入 UART transport、`HELLO_REQ` bootstrap、poll 驱动和最小双向事件消费。
+  - 已能处理 `HELLO_RSP / ACK / NACK / FAULT / MOTION_DONE / LED_DONE / TOUCH_EVENT / MAG_STATE / IMU_STATE`。
 - `hal_servo`
-  - 已收缩为协处理器兼容入口 / 参数校验层
-  - 本地 PWM task / LEDC 运行路径已移除
-  - `GPIO19/20` 已让位给 `mcu_link` 运行时 UART
-  - `hal_servo_init()` 失败已改为启动期 halt，不再静默继续
+  - 已收缩为协处理器兼容入口和参数校验层。
+  - 本地 PWM task / LEDC 后端已移除。
+  - `GPIO19/20` 已让位给 `mcu_link` 运行时 UART。
+- `mcu_motion_service` / `mcu_led_service`
+  - 链路未就绪时返回显式错误，不再把未发送请求当作 accepted。
+  - 已能消费 `ACK / NACK / FAULT / DONE` 类运行时事件。
 - `mcu_sensor_service`
-  - 已建立 `touch / mag / imu` 缓存
-  - 已增加 `mcu_sensor_service_apply_frame()` 作为上行 frame 消费入口
-  - `IMU_STATE / MAG_STATE` 已采用 `latest-state-wins`
-  - 已能消费 `TOUCH_EVENT / MAG_STATE / IMU_STATE`
-- Mock HIL 工具
+  - 已建立 `touch / mag / imu` 缓存和 `latest-state-wins` 状态更新策略。
+- `mcu_power_service`
+  - 已加入 `POWER_5V_ENABLE / POWER_5V_DISABLE` 协议下发路径。
+  - POWER disable 的判据是 STM32 侧舵机 / WS2812 LED 5V rail 或 IP5306 输出端变化；ESP32 由 USB-C 供电，日志串口继续在线是预期现象。
+- 工具与测试
   - 已有 `tools/stm32_uart_hil.py`
   - 已有 `tools/stm32_uart_fault_inject.py`
+  - 已有 `tools/power_5v_toggle_hil.py`
+  - 已有 Python 工具测试覆盖主要 HIL 脚本。
 
-### 2.4 已验证
+## 最新本地验证
 
-以下检查在当前代码上已通过：
+以下检查已在 `D:\GithubRep\WatcheRobot-Firmware` 的 `v2.0.0-refactor` 上通过：
 
-- `idf.py build`
-- `python tools/stm32_uart_hil.py --all-scenarios --transport mock`
-- `python tools/stm32_uart_fault_inject.py --fault ack_timeout`
-- `python tools/stm32_uart_fault_inject.py --fault busy_nack`
-- `git diff --check`
-- `COM28` 刷写成功
-- `COM28` 启动 smoke 成功
-- `stress_standard (no-IMU)` 10 分钟双 MCU HIL 通过
+- `git diff --check 5929987..HEAD`
+- Visual Studio LLVM `clang-format.exe --dry-run --Werror`，覆盖 `firmware/s3/components` 和 `firmware/s3/main` 下本分支改动的 43 个 C/H 文件
+- `python -m pytest tools\tests`
+  - 结果：`8 passed`
+- ESP32 编译：
+  - 命令：`powershell -ExecutionPolicy Bypass -File C:\Users\50533\.codex\skills\watche-dual-mcu-bringup\scripts\run-dual-mcu-bringup.ps1 -SkipStm32Build -SkipStm32Flash -SkipEsp32Flash -SkipSession`
+  - IDF：`C:\Espressif\frameworks\esp-idf-v5.2.1`
+  - build dir：`firmware\s3\build-s3-c-codex`
+  - 结果：`Project build complete`
 
-关键板级日志样本：
+## 已知限制
 
-- [monitor-com28-20260415-164805.log](</D:/GithubRep/worktrees/watcher-v2-runtime-integration/firmware/s3/monitor-com28-20260415-164805.log>)
+- 本次检查没有刷写 ESP32，也没有重新跑 10 分钟双 MCU HIL。
+- `HELLO_RSP -> READY` 当前仍使用 app 层 safe-default baseline helper，正式 baseline restore 仍是下一阶段工作。
+- `control_ingress / behavior_state_service / BLE / WS` 尚未全部切换到完整协处理器返回语义。
+- `IMU_STATE` 不作为当前标准压力场景常开状态流，只在问询或姿态变化事件场景单独验证。
 
-该日志确认：
+## 重新合入注意事项
 
-- 存在 `MCU link scaffold ready`
-- 存在 `after_ui_init`
-- 存在 `WatcheRobot ready`
-- 未发现 `panic`
-- 未发现 `Guru Meditation`
-- `i2s_channel_disable` 仍然存在，但属于已知既有噪声，不是本轮协处理器改动引入
+`main` 已经包含：
 
-最新有效 pressure session：
+- `f7cab6a merge: integrate ESP32 v2.0.0 refactor`
+- `e048fff Revert "merge: integrate ESP32 v2.0.0 refactor"`
 
-- `D:\GithubRep\WatcheRobot-Firmware\.codex\local\logs\50533\stm32-uart2-stress-no-imu\s3-c--stm32-c\session-20260419T053521Z`
+因此后续重新合入不能依赖普通 merge 自动带回同一批内容。推荐流程：
 
-该 session 确认：
-
-- `servo_submit_count=2969`
-- `motion_ack_count=2969`
-- `motion_done_count=2969`
-- `touch_rx_count=1186`
-- `mag_rx_count=1187`
-- `ack_timeout_count=0`
-- `crc_error_count=0`
-- `motion_done_fault_count=0`
-- `reconnect_count=0`
-
-## 3. 当前未完成
-
-以下项目仍未进入“已实现”状态：
-
-- `HELLO_RSP -> READY` 当前已改成 app 层显式 safe-default helper，但仍未替换成正式的 baseline restore 流程
-- `BLE / WS / control_ingress / behavior_state_service` 仍未完成全链路切换
-- 基于真实 STM32 的 UART 闭环联调尚未开始
-
-补充说明：
-
-- stress build 下，`behavior_state_service` 的 motion dispatch 已被有意屏蔽，目的是避免本地 behavior timeline 干扰压测流量；这不是常规业务模式的最终语义
-- stress build 下，`control_ingress` 不再打断 behavior action，motion lane 由 stress driver 独占
-- 标准压力场景的计数闭环依赖 `drain_complete` 结构化日志，不再用“最后一条 periodic stats”作为唯一收尾统计
-
-## 4. 当前阶段判断
-
-结合 [TDD_EXECUTION_PLAN.md](./TDD_EXECUTION_PLAN.md)，当前更准确的阶段判断是：
-
-- 阶段 1：协议合同层，已完成
-- 阶段 2：链路状态机层，已完成最小运行时双向链路
-- 阶段 3：动作与灯效服务层，已完成 motion / led 的最小下行接入
-- 阶段 4：ESP32 适配层，已完成 `hal_servo -> mcu_motion_service` 的后端切换
-- 阶段 5：sensor 缓存层，已完成缓存与 `latest-state-wins` 基础能力
-- 阶段 6：live dispatch / service 消费，已完成最小闭环
-- 阶段 7：真实 STM32 闭环联调，尚未开始
-
-因此当前不应宣称“协处理器链路已完成”，更准确的说法是：
-
-- `ESP32` 侧已完成引脚切换和最小双向链路骨架
-- motion / led / sensor 已具备最小协议接入点，并完成 `READY` 语义收口与最小 live dispatch
-- 还缺正式 baseline restore、上层业务切换和 STM32 实机闭环
-
-## 5. 距离真实 STM32 调试还差多少 ESP 侧工作
-
-### 5.1 可以现在开始的内容
-
-当前已经具备以下条件，因此可以开始“最小串口 bring-up”级别的真实 STM32 调试：
-
-- ESP32 端可以持续发 `HELLO_REQ`
-- 运行时已能持续收取 `HELLO_RSP / ACK / NACK / FAULT`
-- motion / led 的下行帧已可经 `mcu_link` 下发
-- link 未 ready 时不会再把请求误判成 accepted
-- 板级构建、刷写、启动 smoke 已稳定
-
-### 5.2 仍缺的 ESP 侧硬前置项
-
-如果目标是“开始有效的真实 STM32 业务联调”，ESP32 侧还缺 3 类硬前置工作：
-
-1. `mcu_link -> service` 的 live dispatch
-   - 当前最小分发已落地，但还没有扩展到 `MAG_EVENT / IMU_EVENT / SENSOR_HEALTH` 等剩余消息
-2. 正式 baseline restore
-   - 当前 `HELLO_RSP -> READY` 已改成 app 层显式 safe-default helper，适合先跑通，不适合长期作为恢复真源
-3. 串口联调时的 service 级观测闭环
-   - 需要让 motion / led / sensor 层都能暴露“收到了什么、拒绝了什么、完成了什么”
-
-### 5.3 可延后到首轮 bring-up 之后的项
-
-以下工作不阻塞“第一轮 STM32 串口通路验证”，但会阻塞后续完整业务联调：
-
-- `control_ingress / behavior_state_service` 全量切到协处理器返回语义
-- BLE / WS 外部 `sys.ack / sys.nack` 的细致错误映射
-- 更细粒度的 fault code / reason_code 统计与 UI 反馈
-
-## 6. 下一阶段入口
-
-下一阶段不直接落实现，先以待办冻结为准：
-
-- [IMPLEMENTATION_TODO.md](./IMPLEMENTATION_TODO.md)
-- [FIELD_REVIEW_TODO.md](./FIELD_REVIEW_TODO.md)
+1. 确认 `v2.0.0-refactor` 已通过 `HIL_TEST_PLAN.md` 的合并前检查。
+2. 在 `main` 上恢复合入时，使用 revert-of-revert 或等价的新提交重新引入内容。
+3. 合入后再次运行格式检查、Python 测试和 ESP32 build。
+4. 检查通过后再推送 `origin/main`。

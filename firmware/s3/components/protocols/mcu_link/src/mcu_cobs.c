@@ -1,16 +1,11 @@
 #include "mcu_cobs.h"
 
-size_t mcu_cobs_max_encoded_size(size_t input_len)
-{
+size_t mcu_cobs_max_encoded_size(size_t input_len) {
     return input_len + (input_len / 254u) + 1u;
 }
 
-esp_err_t mcu_cobs_encode(const uint8_t *input,
-                          size_t input_len,
-                          uint8_t *output,
-                          size_t output_len,
-                          size_t *encoded_len)
-{
+esp_err_t mcu_cobs_encode(const uint8_t *input, size_t input_len, uint8_t *output, size_t output_len,
+                          size_t *encoded_len) {
     if (output == NULL || encoded_len == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -54,12 +49,8 @@ esp_err_t mcu_cobs_encode(const uint8_t *input,
     return ESP_OK;
 }
 
-esp_err_t mcu_cobs_decode(const uint8_t *input,
-                          size_t input_len,
-                          uint8_t *output,
-                          size_t output_len,
-                          size_t *decoded_len)
-{
+esp_err_t mcu_cobs_decode(const uint8_t *input, size_t input_len, uint8_t *output, size_t output_len,
+                          size_t *decoded_len) {
     if (input == NULL || output == NULL || decoded_len == NULL) {
         return ESP_ERR_INVALID_ARG;
     }

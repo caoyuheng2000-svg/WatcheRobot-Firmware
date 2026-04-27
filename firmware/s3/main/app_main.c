@@ -22,13 +22,13 @@
 #include "esp_lvgl_port.h"
 #include "hal_display.h"
 #include "hal_servo.h"
-#include "mem_monitor.h"
 #include "mcu_led_service.h"
-#include "ota_service.h"
 #include "mcu_link_bootstrap.h"
 #include "mcu_motion_service.h"
 #include "mcu_power_service.h"
 #include "mcu_sensor_service.h"
+#include "mem_monitor.h"
+#include "ota_service.h"
 #include "sensecap-watcher.h"
 #include "stress_mode.h"
 #include "voice_service.h"
@@ -639,8 +639,8 @@ static void init_mcu_link_bootstrap(void) {
         ESP_LOGW(TAG, "MCU link bootstrap start failed: %s", esp_err_to_name(ret));
     }
 
-    ESP_LOGI(TAG, "MCU link scaffold ready (present=%d state=%d link_ready=%d ready=%d)",
-             link != NULL ? 1 : 0, (int)mcu_link_bootstrap_get_state(), mcu_link_bootstrap_is_link_ready() ? 1 : 0,
+    ESP_LOGI(TAG, "MCU link scaffold ready (present=%d state=%d link_ready=%d ready=%d)", link != NULL ? 1 : 0,
+             (int)mcu_link_bootstrap_get_state(), mcu_link_bootstrap_is_link_ready() ? 1 : 0,
              mcu_link_bootstrap_is_ready() ? 1 : 0);
     ESP_LOGI(MCU_OBS_TAG, "evt=link_bootstrap_ready link_state=%s link_ready=%d ready=%d",
              mcu_link_state_to_string(mcu_link_bootstrap_get_state()), mcu_link_bootstrap_is_link_ready() ? 1 : 0,

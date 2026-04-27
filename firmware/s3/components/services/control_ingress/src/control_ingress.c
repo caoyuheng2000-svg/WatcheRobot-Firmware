@@ -346,10 +346,8 @@ esp_err_t control_ingress_submit_servo_with_seq(const control_servo_request_t *r
     }
 
     return hal_servo_move_smooth_with_source_and_seq(req->has_x ? SERVO_AXIS_X : SERVO_AXIS_Y,
-                                                     req->has_x ? req->x_deg : req->y_deg,
-                                                     req->duration_ms,
-                                                     HAL_SERVO_MOTION_SOURCE_UNKNOWN,
-                                                     out_seq);
+                                                     req->has_x ? req->x_deg : req->y_deg, req->duration_ms,
+                                                     HAL_SERVO_MOTION_SOURCE_UNKNOWN, out_seq);
 }
 
 esp_err_t control_ingress_submit_ai_status(const control_ai_status_request_t *req) {

@@ -1729,7 +1729,8 @@ static void behavior_task(void *arg) {
                     if (s_ctx.current_state->timeline_end_ms > 0 && behavior_all_state_events_dispatched_locked() &&
                         behavior_all_action_events_dispatched_locked() &&
                         elapsed_ms >= s_ctx.current_state->timeline_end_ms &&
-                        (s_ctx.current_action == NULL || action_elapsed_ms >= s_ctx.current_action->total_duration_ms)) {
+                        (s_ctx.current_action == NULL ||
+                         action_elapsed_ms >= s_ctx.current_action->total_duration_ms)) {
                         s_ctx.state_started_ms = now_ms;
                         s_ctx.next_motion_index = 0;
                         s_ctx.next_expression_index = 0;

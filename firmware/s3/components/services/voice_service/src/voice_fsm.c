@@ -1,7 +1,7 @@
 #include "anim_player.h"
 #include "behavior_state_service.h"
-#include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -56,8 +56,7 @@ static void log_internal_heap_state(const char *stage);
 
 static void show_cloud_not_ready_state(void) {
     bool connected = ws_client_is_connected() != 0;
-    behavior_state_set_with_text(connected ? "processing" : "error",
-                                 connected ? "Cloud Handshake..." : "Cloud Offline",
+    behavior_state_set_with_text(connected ? "processing" : "error", connected ? "Cloud Handshake..." : "Cloud Offline",
                                  0);
 }
 
@@ -120,8 +119,7 @@ static void show_listening_ui(void) {
     } else {
         ESP_LOGW(TAG,
                  "Low internal heap, keeping current frame to avoid animation stop flush: free=%u KB largest=%u KB",
-                 (unsigned)(free_internal / 1024U),
-                 (unsigned)(largest_internal / 1024U));
+                 (unsigned)(free_internal / 1024U), (unsigned)(largest_internal / 1024U));
     }
 
     if (has_listening_ui_headroom(&free_internal, &largest_internal)) {
@@ -130,18 +128,14 @@ static void show_listening_ui(void) {
     }
 
     if (has_text_only_listening_ui_headroom(&free_internal, &largest_internal)) {
-        ESP_LOGW(TAG,
-                 "Low internal heap, using text-only listening UI: free=%u KB largest=%u KB",
-                 (unsigned)(free_internal / 1024U),
-                 (unsigned)(largest_internal / 1024U));
+        ESP_LOGW(TAG, "Low internal heap, using text-only listening UI: free=%u KB largest=%u KB",
+                 (unsigned)(free_internal / 1024U), (unsigned)(largest_internal / 1024U));
         behavior_state_set_text_style("Listening...", 24, false);
         return;
     }
 
-    ESP_LOGW(TAG,
-             "Very low internal heap, skipping listening UI refresh: free=%u KB largest=%u KB",
-             (unsigned)(free_internal / 1024U),
-             (unsigned)(largest_internal / 1024U));
+    ESP_LOGW(TAG, "Very low internal heap, skipping listening UI refresh: free=%u KB largest=%u KB",
+             (unsigned)(free_internal / 1024U), (unsigned)(largest_internal / 1024U));
 }
 
 /* ------------------------------------------------------------------ */
@@ -278,10 +272,8 @@ static int start_recording(void) {
     if (can_freeze_animation_for_recording(&free_internal, &largest_internal)) {
         freeze_current_animation();
     } else {
-        ESP_LOGW(TAG,
-                 "Low internal heap, skipping animation freeze before recording: free=%u KB largest=%u KB",
-                 (unsigned)(free_internal / 1024U),
-                 (unsigned)(largest_internal / 1024U));
+        ESP_LOGW(TAG, "Low internal heap, skipping animation freeze before recording: free=%u KB largest=%u KB",
+                 (unsigned)(free_internal / 1024U), (unsigned)(largest_internal / 1024U));
     }
 
     hal_audio_set_playback_mode(false);
@@ -459,26 +451,16 @@ int voice_recorder_tick(void) {
         ws_client_get_audio_queue_stats(&queue_stats);
         ws_client_get_media_send_stats(&send_stats);
         ESP_LOGI(TAG,
-                 "Audio: frame#%d rms=%d peak=%d zeros=%d/%d queue{pending=%u high=%u queued=%lu sent=%lu dropped=%lu delay=%lu end=%d first=%d} "
+                 "Audio: frame#%d rms=%d peak=%d zeros=%d/%d queue{pending=%u high=%u queued=%lu sent=%lu dropped=%lu "
+                 "delay=%lu end=%d first=%d} "
                  "send{total=%lu lock=%lu send=%lu payload=%u packet=%u}",
-                 g_stats.encode_count + 1,
-                 rms,
-                 peak,
-                 zero_count,
-                 sample_count,
-                 (unsigned int)queue_stats.pending_frames,
-                 (unsigned int)queue_stats.high_watermark,
-                 (unsigned long)queue_stats.queued_frames,
-                 (unsigned long)queue_stats.sent_frames,
-                 (unsigned long)queue_stats.dropped_frames,
-                 (unsigned long)queue_stats.last_queue_delay_us,
-                 queue_stats.end_pending,
-                 queue_stats.first_frame_pending,
-                 (unsigned long)send_stats.total_us,
-                 (unsigned long)send_stats.lock_wait_us,
-                 (unsigned long)send_stats.send_us,
-                 (unsigned int)send_stats.payload_len,
-                 (unsigned int)send_stats.packet_len);
+                 g_stats.encode_count + 1, rms, peak, zero_count, sample_count,
+                 (unsigned int)queue_stats.pending_frames, (unsigned int)queue_stats.high_watermark,
+                 (unsigned long)queue_stats.queued_frames, (unsigned long)queue_stats.sent_frames,
+                 (unsigned long)queue_stats.dropped_frames, (unsigned long)queue_stats.last_queue_delay_us,
+                 queue_stats.end_pending, queue_stats.first_frame_pending, (unsigned long)send_stats.total_us,
+                 (unsigned long)send_stats.lock_wait_us, (unsigned long)send_stats.send_us,
+                 (unsigned int)send_stats.payload_len, (unsigned int)send_stats.packet_len);
     }
 
 #ifdef CONFIG_ENABLE_WAKE_WORD

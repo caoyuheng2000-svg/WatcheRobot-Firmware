@@ -20,27 +20,23 @@ typedef struct {
 
 static fake_uart_state_t s_fake_uart;
 
-static void fake_uart_reset(void)
-{
+static void fake_uart_reset(void) {
     memset(&s_fake_uart, 0, sizeof(s_fake_uart));
     s_fake_uart.ready = true;
 }
 
-static void fake_uart_enqueue(const uint8_t *data, size_t data_len)
-{
+static void fake_uart_enqueue(const uint8_t *data, size_t data_len) {
     assert(data != NULL);
     assert((s_fake_uart.rx_len + data_len) <= sizeof(s_fake_uart.rx_buffer));
     memcpy(&s_fake_uart.rx_buffer[s_fake_uart.rx_len], data, data_len);
     s_fake_uart.rx_len += data_len;
 }
 
-bool mcu_link_uart_is_ready(void)
-{
+bool mcu_link_uart_is_ready(void) {
     return s_fake_uart.ready;
 }
 
-esp_err_t mcu_link_uart_write(const uint8_t *data, size_t data_len, size_t *out_written)
-{
+esp_err_t mcu_link_uart_write(const uint8_t *data, size_t data_len, size_t *out_written) {
     if (data == NULL || data_len == 0u) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -56,8 +52,7 @@ esp_err_t mcu_link_uart_write(const uint8_t *data, size_t data_len, size_t *out_
     return ESP_OK;
 }
 
-esp_err_t mcu_link_uart_read(uint8_t *buffer, size_t buffer_len, uint32_t timeout_ms, size_t *out_read)
-{
+esp_err_t mcu_link_uart_read(uint8_t *buffer, size_t buffer_len, uint32_t timeout_ms, size_t *out_read) {
     size_t available;
     size_t read_len;
 
@@ -85,8 +80,7 @@ esp_err_t mcu_link_uart_read(uint8_t *buffer, size_t buffer_len, uint32_t timeou
     return ESP_OK;
 }
 
-esp_err_t mcu_link_uart_get_buffered_bytes(size_t *out_bytes)
-{
+esp_err_t mcu_link_uart_get_buffered_bytes(size_t *out_bytes) {
     if (out_bytes == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -95,8 +89,7 @@ esp_err_t mcu_link_uart_get_buffered_bytes(size_t *out_bytes)
     return ESP_OK;
 }
 
-static mcu_link_test_packet_t make_ack_packet(uint32_t seq, uint32_t ref_seq)
-{
+static mcu_link_test_packet_t make_ack_packet(uint32_t seq, uint32_t ref_seq) {
     static const uint16_t status_code = 0u;
     mcu_frame_header_t header;
     uint8_t payload[6];
@@ -114,19 +107,10 @@ static mcu_link_test_packet_t make_ack_packet(uint32_t seq, uint32_t ref_seq)
     return packet;
 }
 
-static mcu_link_test_packet_t make_hello_rsp_packet(uint32_t seq)
-{
+static mcu_link_test_packet_t make_hello_rsp_packet(uint32_t seq) {
     mcu_frame_header_t header;
     uint8_t payload[9] = {
-        0x01u,
-        0x00u,
-        0x01u,
-        0x00u,
-        0x01u,
-        0x20u,
-        0x00u,
-        0x00u,
-        0x01u,
+        0x01u, 0x00u, 0x01u, 0x00u, 0x01u, 0x20u, 0x00u, 0x00u, 0x01u,
     };
     mcu_link_test_packet_t packet = {0};
 
@@ -136,8 +120,7 @@ static mcu_link_test_packet_t make_hello_rsp_packet(uint32_t seq)
     return packet;
 }
 
-static mcu_link_test_packet_t make_motion_done_packet(uint32_t seq, uint32_t ref_seq)
-{
+static mcu_link_test_packet_t make_motion_done_packet(uint32_t seq, uint32_t ref_seq) {
     mcu_frame_header_t header;
     uint8_t payload[11] = {0};
     mcu_link_test_packet_t packet = {0};
@@ -160,8 +143,7 @@ static mcu_link_test_packet_t make_motion_done_packet(uint32_t seq, uint32_t ref
     return packet;
 }
 
-static mcu_link_test_packet_t make_imu_packet(uint32_t seq)
-{
+static mcu_link_test_packet_t make_imu_packet(uint32_t seq) {
     mcu_frame_header_t header;
     uint8_t payload[11] = {0};
     mcu_link_test_packet_t packet = {0};
@@ -183,16 +165,14 @@ static mcu_link_test_packet_t make_imu_packet(uint32_t seq)
     return packet;
 }
 
-static void expect_stats(const mcu_link_t *link, uint32_t crc_error_count)
-{
+static void expect_stats(const mcu_link_t *link, uint32_t crc_error_count) {
     mcu_link_stats_t stats = {0};
 
     assert(mcu_link_copy_stats(link, &stats) == ESP_OK);
     assert(stats.crc_error_count == crc_error_count);
 }
 
-static void test_poll_decodes_single_ack_frame(void)
-{
+static void test_poll_decodes_single_ack_frame(void) {
     mcu_link_t link = {0};
     mcu_link_event_t event = {0};
     const mcu_link_test_packet_t ack = make_ack_packet(3u, 1u);
@@ -210,8 +190,7 @@ static void test_poll_decodes_single_ack_frame(void)
     expect_stats(&link, 0u);
 }
 
-static void test_poll_keeps_second_frame_from_single_uart_read(void)
-{
+static void test_poll_keeps_second_frame_from_single_uart_read(void) {
     mcu_link_t link = {0};
     mcu_link_event_t event = {0};
     const mcu_link_test_packet_t ack = make_ack_packet(7u, 5u);
@@ -238,8 +217,7 @@ static void test_poll_keeps_second_frame_from_single_uart_read(void)
     expect_stats(&link, 0u);
 }
 
-static void test_poll_decodes_interleaved_burst_across_uart_chunks(void)
-{
+static void test_poll_decodes_interleaved_burst_across_uart_chunks(void) {
     mcu_link_t link = {0};
     mcu_link_event_t event = {0};
     size_t i;
@@ -278,8 +256,7 @@ static void test_poll_decodes_interleaved_burst_across_uart_chunks(void)
     expect_stats(&link, 0u);
 }
 
-int main(void)
-{
+int main(void) {
     const struct {
         const char *name;
         void (*fn)(void);
