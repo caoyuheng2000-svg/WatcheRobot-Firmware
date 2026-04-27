@@ -284,8 +284,6 @@ static int start_recording(void) {
                  (unsigned)(largest_internal / 1024U));
     }
 
-    hal_audio_set_playback_mode(false);
-    hal_audio_set_sample_rate(16000);
     ESP_LOGI(TAG, "start_recording: calling hal_audio_start()");
     if (hal_audio_start() != 0) {
         ESP_LOGE(TAG, "start_recording: hal_audio_start failed");

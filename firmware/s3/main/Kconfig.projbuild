@@ -31,29 +31,6 @@ menu "Watcher Logging"
 
 endmenu
 
-menu "Watcher Stress"
-
-    config WATCHER_STRESS_BUILD
-        bool "Enable dual-MCU stress driver"
-        default n
-        help
-            Compile in the periodic coprocessor stress driver used for the
-            10-minute STM32/ESP32 pressure bench.
-
-    config WATCHER_STRESS_SERVO_PERIOD_MS
-        int "Stress servo command period (ms)"
-        range 50 5000
-        default 200
-        depends on WATCHER_STRESS_BUILD
-
-    config WATCHER_STRESS_STATS_PERIOD_MS
-        int "Stress stats log period (ms)"
-        range 500 60000
-        default 5000
-        depends on WATCHER_STRESS_BUILD
-
-endmenu
-
 menu "Watcher Memory Monitor"
 
     config WATCHER_MEM_MONITOR_ENABLE

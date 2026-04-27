@@ -1,11 +1,15 @@
 /**
  * @file hal_servo.h
- * @brief Servo compatibility facade backed by the STM32 coprocessor link.
+ * @brief Servo HAL: LEDC PWM direct drive on GPIO 19 (X) and GPIO 20 (Y)
  *
- * GPIO19/GPIO20 are no longer owned by a local LEDC PWM backend. They are
- * reserved for the runtime UART link to the STM32 coprocessor, and this HAL
- * now serves as a compatibility layer that forwards servo requests to
- * `mcu_motion_service`.
+ * Replaces the UART-to-MCU servo bridge used in v1.x.
+ * GPIO 19/20 are repurposed from UART TX/RX to LEDC PWM channels.
+ *
+ * Features:
+ *   - 50Hz, 14-bit LEDC PWM
+ *   - Smooth movement with linear interpolation
+ *   - Synchronized dual-axis motion
+ *   - Y-axis mechanical limit protection
  */
 
 #ifndef HAL_SERVO_H
@@ -21,30 +25,34 @@ typedef enum {
 } servo_axis_t;
 
 /**
- * @brief Motion source tags kept for coprocessor motion attribution.
- */
-typedef enum {
-    HAL_SERVO_MOTION_SOURCE_UNKNOWN = 0,
-    HAL_SERVO_MOTION_SOURCE_BEHAVIOR = 1,
-    HAL_SERVO_MOTION_SOURCE_BLE = 2,
-    HAL_SERVO_MOTION_SOURCE_WS = 3,
-    HAL_SERVO_MOTION_SOURCE_RECOVERY = 4,
-} hal_servo_motion_source_t;
-
-/**
- * @brief Initialize servo compatibility facade.
+ * @brief Initialize servo HAL with LEDC PWM output.
  *
- * The facade keeps local validation, source tagging, and last-command cache,
- * but no longer owns GPIO19/GPIO20 or a local PWM task. `hal_servo_get_angle()`
- * returns the last commanded target angle until STM32 feedback is integrated.
+ * Configures GPIO 19 (X axis) and GPIO 20 (Y axis) as LEDC PWM channels
+ * and starts the smooth-move background task.
+ *
+ * Logical angle model:
+ *   - Public APIs use installation-space logical angles in the 0-180 range
+ *   - 90° is the installed neutral position for the current mechanism
+ *   - Internally the HAL maps logical 90° to the MS90 neutral pulse of 1500us
+ *
+ * Startup defaults applied directly by hal_servo_init():
+ *   - X axis: 90°
+ *   - Y axis: 120°
+ *
+ * Note: some behavior states later move Y to 120° after startup. That behavior
+ * is defined by the state/action resources, not by the HAL defaults.
  *
  * @note Must be called before any hal_servo_set_angle() calls.
- * @note GPIO19/GPIO20 are reserved for `mcu_link` runtime UART.
+ * @note GPIO 19/20 are repurposed from UART (MCU communication removed in v2.0).
+ *
+ * @return
+ *   - ESP_OK    on success
+ *   - ESP_FAIL  if LEDC timer/channel configuration fails
  */
 esp_err_t hal_servo_init(void);
 
 /**
- * @brief Set servo angle with an immediate coprocessor command.
+ * @brief Set servo angle immediately (no smoothing).
  *
  * @param axis    Servo axis (X or Y)
  * @param angle   Target logical angle in degrees (0–180, neutral at 90)
@@ -55,7 +63,8 @@ esp_err_t hal_servo_set_angle(servo_axis_t axis, int angle_deg);
 /**
  * @brief Move servo to angle with smooth interpolation.
  *
- * Forwards a smooth move command to `mcu_motion_service`.
+ * Enqueues a smooth move command. The background task interpolates
+ * from current position to target over duration_ms milliseconds.
  *
  * @param axis        Servo axis (X or Y)
  * @param angle_deg   Target logical angle (0–180, neutral at 90)
@@ -63,20 +72,9 @@ esp_err_t hal_servo_set_angle(servo_axis_t axis, int angle_deg);
  * @return ESP_OK on success
  */
 esp_err_t hal_servo_move_smooth(servo_axis_t axis, int angle_deg, int duration_ms);
-esp_err_t hal_servo_move_smooth_with_source(servo_axis_t axis,
-                                            int angle_deg,
-                                            int duration_ms,
-                                            hal_servo_motion_source_t source);
-esp_err_t hal_servo_move_smooth_with_source_and_seq(servo_axis_t axis,
-                                                    int angle_deg,
-                                                    int duration_ms,
-                                                    hal_servo_motion_source_t source,
-                                                    uint32_t *out_seq);
 
 /**
  * @brief Move both axes simultaneously.
- *
- * Forwards a synchronized dual-axis command to `mcu_motion_service`.
  *
  * @param x_deg       Target logical X angle (0–180, neutral at 90)
  * @param y_deg       Target logical Y angle (0–180, neutral at 90)
@@ -84,15 +82,6 @@ esp_err_t hal_servo_move_smooth_with_source_and_seq(servo_axis_t axis,
  * @return ESP_OK on success
  */
 esp_err_t hal_servo_move_sync(int x_deg, int y_deg, int duration_ms);
-esp_err_t hal_servo_move_sync_with_source(int x_deg,
-                                          int y_deg,
-                                          int duration_ms,
-                                          hal_servo_motion_source_t source);
-esp_err_t hal_servo_move_sync_with_source_and_seq(int x_deg,
-                                                  int y_deg,
-                                                  int duration_ms,
-                                                  hal_servo_motion_source_t source,
-                                                  uint32_t *out_seq);
 
 /**
  * @brief Send servo command by axis name string (for WebSocket handler).
@@ -108,18 +97,22 @@ esp_err_t hal_servo_move_sync_with_source_and_seq(int x_deg,
 esp_err_t hal_servo_send_cmd(const char *id, int angle_deg, int duration_ms);
 
 /**
- * @brief Cancel in-flight coprocessor servo motions.
+ * @brief Cancel in-flight and queued smooth servo motions.
+ *
+ * Clears the pending motion queue and asks the background interpolation task
+ * to stop the currently executing smooth segment on its next interpolation
+ * step boundary. This is used by higher-level behavior/state switching so a
+ * new action does not have to wait for the previous loop's queued motions.
  *
  * @return ESP_OK on success, ESP_ERR_INVALID_STATE if servo HAL is not ready
  */
 esp_err_t hal_servo_cancel_all(void);
-esp_err_t hal_servo_cancel_all_with_source(hal_servo_motion_source_t source);
 
 /**
- * @brief Get the last commanded servo angle.
+ * @brief Get current servo angle.
  *
  * @param axis Servo axis
- * @return Last commanded logical angle in degrees, or -1 if not initialized
+ * @return Current logical angle in degrees, or -1 if not initialized
  */
 int hal_servo_get_angle(servo_axis_t axis);
 

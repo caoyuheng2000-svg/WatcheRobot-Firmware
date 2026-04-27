@@ -23,14 +23,8 @@
 #include "hal_display.h"
 #include "hal_servo.h"
 #include "mem_monitor.h"
-#include "mcu_led_service.h"
 #include "ota_service.h"
-#include "mcu_link_bootstrap.h"
-#include "mcu_motion_service.h"
-#include "mcu_power_service.h"
-#include "mcu_sensor_service.h"
 #include "sensecap-watcher.h"
-#include "stress_mode.h"
 #include "voice_service.h"
 #include "wifi_manager.h"
 #include "ws_client.h"
@@ -44,7 +38,6 @@
 #include <string.h>
 
 #define TAG "MAIN"
-#define MCU_OBS_TAG "MCU_OBS"
 
 /* Physical restart: click count to trigger reboot */
 #define RESTART_CLICK_COUNT 3
@@ -66,14 +59,6 @@
 #define WS_START_DISPLAY_SETTLE_MS 150U
 #define CLOUD_RUNTIME_MIN_INTERNAL_FREE_BYTES (24U * 1024U)
 #define CLOUD_RUNTIME_MIN_INTERNAL_LARGEST_BYTES (12U * 1024U)
-#if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
-#define MCU_LINK_RUNTIME_MAX_EVENTS_PER_TICK 64
-#define MCU_LINK_RUNTIME_TASK_PERIOD_MS 2
-#define MAIN_LOOP_DELAY_MS 10
-#else
-#define MCU_LINK_RUNTIME_MAX_EVENTS_PER_TICK 4
-#define MAIN_LOOP_DELAY_MS 100
-#endif
 // #define CAMERA_DIAG_MIN_INTERNAL_FREE_BYTES (48U * 1024U)
 // #define CAMERA_DIAG_MIN_INTERNAL_LARGEST_BYTES (16U * 1024U)
 #ifdef CONFIG_WATCHER_ANIM_FPS
@@ -138,99 +123,6 @@ static int64_t s_cached_ws_connect_started_us = 0;
 static int64_t s_wifi_recovery_started_us = 0;
 static QueueHandle_t s_discovery_result_queue = NULL;
 static char s_cached_ws_url[CACHED_WS_URL_MAX_LEN] = {0};
-static bool s_mcu_obs_state_initialized = false;
-static mcu_link_state_t s_last_mcu_obs_state = MCU_LINK_STATE_DOWN;
-static bool s_mcu_obs_stats_initialized = false;
-static mcu_link_stats_t s_last_mcu_obs_stats = {0};
-static int64_t s_last_mcu_obs_stats_log_us = 0;
-#if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
-static TaskHandle_t s_mcu_link_runtime_task = NULL;
-#endif
-
-static uint16_t decode_u16_le(const uint8_t *src) {
-    return (uint16_t)(((uint16_t)src[0]) | ((uint16_t)src[1] << 8u));
-}
-
-static uint32_t decode_u32_le(const uint8_t *src) {
-    return ((uint32_t)src[0]) | ((uint32_t)src[1] << 8u) | ((uint32_t)src[2] << 16u) | ((uint32_t)src[3] << 24u);
-}
-
-static const char *mcu_link_state_to_string(mcu_link_state_t state) {
-    switch (state) {
-    case MCU_LINK_STATE_DOWN:
-        return "DOWN";
-    case MCU_LINK_STATE_HANDSHAKING:
-        return "HANDSHAKING";
-    case MCU_LINK_STATE_LINK_READY:
-        return "LINK_READY";
-    case MCU_LINK_STATE_READY:
-        return "READY";
-    case MCU_LINK_STATE_DEGRADED:
-        return "DEGRADED";
-    case MCU_LINK_STATE_RECOVERING:
-        return "RECOVERING";
-    default:
-        return "UNKNOWN";
-    }
-}
-
-static void log_mcu_obs_stats(mcu_link_t *link, const char *reason) {
-    mcu_link_stats_t stats = {0};
-
-    if (link == NULL || mcu_link_copy_stats(link, &stats) != ESP_OK) {
-        return;
-    }
-
-    ESP_LOGI(MCU_OBS_TAG,
-             "evt=stats reason=%s link_state=%s ack_timeout_count=%lu reconnect_count=%lu "
-             "motion_done_fault_count=%lu dropped_state_count=%lu crc_error_count=%lu",
-             reason ? reason : "unspecified", mcu_link_state_to_string(mcu_link_get_state(link)),
-             (unsigned long)stats.ack_timeout_count, (unsigned long)stats.reconnect_count,
-             (unsigned long)stats.motion_done_fault_count, (unsigned long)stats.dropped_state_count,
-             (unsigned long)stats.crc_error_count);
-
-    s_last_mcu_obs_stats = stats;
-    s_last_mcu_obs_stats_log_us = esp_timer_get_time();
-    s_mcu_obs_stats_initialized = true;
-}
-
-static void maybe_log_mcu_obs_stats(mcu_link_t *link, const char *reason, bool force) {
-    mcu_link_stats_t current_stats = {0};
-    bool changed;
-    bool periodic_due;
-
-    if (link == NULL || mcu_link_copy_stats(link, &current_stats) != ESP_OK) {
-        return;
-    }
-
-    changed = !s_mcu_obs_stats_initialized || memcmp(&current_stats, &s_last_mcu_obs_stats, sizeof(current_stats)) != 0;
-    periodic_due = s_last_mcu_obs_stats_log_us == 0 ||
-                   (esp_timer_get_time() - s_last_mcu_obs_stats_log_us) >= (5LL * 1000LL * 1000LL);
-
-#if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
-    if (!force && reason != NULL && strcmp(reason, "event_processed") == 0) {
-        return;
-    }
-
-    if (!force && reason != NULL && strcmp(reason, "periodic") == 0 && !periodic_due) {
-        return;
-    }
-#endif
-
-    if (force || changed || periodic_due) {
-        log_mcu_obs_stats(link, reason);
-    }
-}
-
-static void maybe_log_mcu_obs_state_transition(mcu_link_t *link, const char *reason) {
-    const mcu_link_state_t current_state = (link != NULL) ? mcu_link_get_state(link) : MCU_LINK_STATE_DOWN;
-
-    if (!s_mcu_obs_state_initialized || current_state != s_last_mcu_obs_state) {
-        s_last_mcu_obs_state = current_state;
-        s_mcu_obs_state_initialized = true;
-        maybe_log_mcu_obs_stats(link, reason ? reason : "state_transition", true);
-    }
-}
 
 static const char *transport_state_to_string(transport_state_t state) {
     switch (state) {
@@ -313,7 +205,6 @@ static void configure_runtime_log_levels(void) {
 #if CONFIG_WATCHER_RUNTIME_QUIET_LOGS
     esp_log_level_set("*", ESP_LOG_WARN);
     esp_log_level_set(TAG, ESP_LOG_INFO);
-    esp_log_level_set(MCU_OBS_TAG, ESP_LOG_INFO);
     esp_log_level_set("MEM_MON", ESP_LOG_INFO);
 #endif
 }
@@ -332,9 +223,6 @@ static void maybe_play_ble_connected_feedback(void);
 static void boot_halt_with_error(const char *error_msg);
 static void log_directory_contents(const char *path);
 static int boot_prepare_animation_assets(void);
-#if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
-static void ensure_mcu_link_runtime_task_started(void);
-#endif
 
 #define LOG_HEAP_STATE(stage) mem_monitor_snapshot(stage)
 
@@ -622,200 +510,6 @@ static void init_runtime_inputs_and_restart_path(void) {
         ESP_LOGW(TAG, "Skipping %d-click restart callback because knob input is unavailable", RESTART_CLICK_COUNT);
     }
 }
-
-static void init_mcu_link_bootstrap(void) {
-    esp_err_t ret;
-    mcu_link_t *link;
-
-    ret = mcu_link_bootstrap_init();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "MCU link bootstrap init failed: %s", esp_err_to_name(ret));
-        return;
-    }
-
-    link = mcu_link_bootstrap_get_link();
-    ret = mcu_link_bootstrap_start();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "MCU link bootstrap start failed: %s", esp_err_to_name(ret));
-    }
-
-    ESP_LOGI(TAG, "MCU link scaffold ready (present=%d state=%d link_ready=%d ready=%d)",
-             link != NULL ? 1 : 0, (int)mcu_link_bootstrap_get_state(), mcu_link_bootstrap_is_link_ready() ? 1 : 0,
-             mcu_link_bootstrap_is_ready() ? 1 : 0);
-    ESP_LOGI(MCU_OBS_TAG, "evt=link_bootstrap_ready link_state=%s link_ready=%d ready=%d",
-             mcu_link_state_to_string(mcu_link_bootstrap_get_state()), mcu_link_bootstrap_is_link_ready() ? 1 : 0,
-             mcu_link_bootstrap_is_ready() ? 1 : 0);
-    maybe_log_mcu_obs_state_transition(link, "bootstrap_ready");
-}
-
-static void init_mcu_runtime_services(void) {
-    esp_err_t ret;
-
-    ret = mcu_led_service_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "MCU LED service init failed: %s", esp_err_to_name(ret));
-        boot_halt_with_error("MCU LED init failed");
-    }
-
-    ret = mcu_sensor_service_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "MCU sensor service init failed: %s", esp_err_to_name(ret));
-        boot_halt_with_error("MCU sensor init failed");
-    }
-
-    ret = mcu_power_service_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "MCU power service init failed: %s", esp_err_to_name(ret));
-        boot_halt_with_error("MCU power init failed");
-    }
-
-    stress_mode_init();
-#if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
-    ensure_mcu_link_runtime_task_started();
-#endif
-}
-
-static void maybe_complete_mcu_link_baseline_restore(const mcu_link_event_t *event) {
-    mcu_link_t *link;
-    esp_err_t ret;
-
-    if (event == NULL || event->type != MCU_LINK_RX_EVENT_HELLO_RSP) {
-        return;
-    }
-
-    link = mcu_link_bootstrap_get_link();
-    if (link == NULL || !mcu_link_is_link_ready(link) || mcu_link_is_ready(link)) {
-        return;
-    }
-
-    if (mcu_link_snapshot_supported(link)) {
-        ESP_LOGW(TAG, "MCU link snapshot restore is not implemented yet; using explicit safe-default baseline");
-    } else {
-        ESP_LOGI(TAG, "MCU link restoring explicit safe-default baseline (no snapshot support)");
-    }
-    ESP_LOGI(MCU_OBS_TAG, "evt=baseline_restore_begin link_state=%s snapshot_supported=%d",
-             mcu_link_state_to_string(mcu_link_get_state(link)), mcu_link_snapshot_supported(link) ? 1 : 0);
-
-    ret = mcu_link_mark_baseline_synced(link);
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "MCU link baseline restore failed: %s", esp_err_to_name(ret));
-        return;
-    }
-
-    ESP_LOGI(TAG, "MCU link baseline restore completed (state=%d ready=%d)", (int)mcu_link_get_state(link),
-             mcu_link_is_ready(link) ? 1 : 0);
-    ESP_LOGI(MCU_OBS_TAG, "evt=baseline_restore_done link_state=%s ready=%d",
-             mcu_link_state_to_string(mcu_link_get_state(link)), mcu_link_is_ready(link) ? 1 : 0);
-    if (mcu_link_is_ready(link)) {
-        stress_mode_notify_ready();
-        ESP_LOGI(MCU_OBS_TAG, "evt=ready link_state=%s", mcu_link_state_to_string(mcu_link_get_state(link)));
-    }
-    maybe_log_mcu_obs_state_transition(link, "baseline_restore_done");
-}
-
-static void dispatch_mcu_link_runtime_event(const mcu_link_event_t *event) {
-    mcu_link_t *link;
-    bool overwrote_latest = false;
-
-    if (event == NULL || event->type == MCU_LINK_RX_EVENT_NONE) {
-        return;
-    }
-
-    link = mcu_link_bootstrap_get_link();
-    switch (event->type) {
-    case MCU_LINK_RX_EVENT_HELLO_RSP:
-        ESP_LOGI(MCU_OBS_TAG, "evt=hello_rsp seq=%lu msg_class=%u msg_id=%u link_state=%s snapshot_supported=%d",
-                 (unsigned long)event->frame.header.seq, (unsigned)event->frame.header.msg_class,
-                 (unsigned)event->frame.header.msg_id, mcu_link_state_to_string(mcu_link_get_state(link)),
-                 (link != NULL && mcu_link_snapshot_supported(link)) ? 1 : 0);
-        break;
-    case MCU_LINK_RX_EVENT_ACK:
-#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
-        ESP_LOGI(MCU_OBS_TAG, "evt=ack ref_seq=%lu msg_class=%u msg_id=%u link_state=%s",
-                 (unsigned long)decode_u32_le(event->frame.payload), (unsigned)event->frame.header.msg_class,
-                 (unsigned)event->frame.header.msg_id, mcu_link_state_to_string(mcu_link_get_state(link)));
-#endif
-        break;
-    case MCU_LINK_RX_EVENT_NACK:
-        ESP_LOGI(MCU_OBS_TAG, "evt=nack ref_seq=%lu reason_code=0x%04x msg_class=%u msg_id=%u link_state=%s",
-                 (unsigned long)decode_u32_le(event->frame.payload), (unsigned)decode_u16_le(&event->frame.payload[6]),
-                 (unsigned)event->frame.header.msg_class, (unsigned)event->frame.header.msg_id,
-                 mcu_link_state_to_string(mcu_link_get_state(link)));
-        break;
-    case MCU_LINK_RX_EVENT_FAULT:
-        ESP_LOGI(MCU_OBS_TAG,
-                 "evt=fault ref_seq=%lu fault_source=%u reason_code=0x%04x msg_class=%u msg_id=%u link_state=%s",
-                 (unsigned long)decode_u32_le(event->frame.payload), (unsigned)event->frame.payload[4],
-                 (unsigned)decode_u16_le(&event->frame.payload[5]), (unsigned)event->frame.header.msg_class,
-                 (unsigned)event->frame.header.msg_id, mcu_link_state_to_string(mcu_link_get_state(link)));
-        break;
-    default:
-        break;
-    }
-    maybe_complete_mcu_link_baseline_restore(event);
-    (void)mcu_motion_service_handle_link_event(event);
-    (void)mcu_led_service_handle_link_event(event);
-    (void)mcu_power_service_handle_link_event(event);
-    (void)mcu_sensor_service_handle_link_event(event, &overwrote_latest);
-    stress_mode_on_link_event(event);
-
-    if (overwrote_latest &&
-        (event->type == MCU_LINK_RX_EVENT_IMU_STATE || event->type == MCU_LINK_RX_EVENT_MAG_STATE)) {
-        link = mcu_link_bootstrap_get_link();
-        if (link != NULL) {
-            (void)mcu_link_record_dropped_state(link);
-        }
-    }
-
-    maybe_log_mcu_obs_state_transition(link, "event_processed");
-    maybe_log_mcu_obs_stats(link, "event_processed", false);
-}
-
-static void service_mcu_link_runtime(void) {
-    int processed = 0;
-
-    while (processed < MCU_LINK_RUNTIME_MAX_EVENTS_PER_TICK) {
-        mcu_link_event_t event = {0};
-        esp_err_t ret = mcu_link_bootstrap_poll(&event);
-
-        if (ret == ESP_OK) {
-            dispatch_mcu_link_runtime_event(&event);
-            processed++;
-            continue;
-        }
-
-        if (ret == ESP_ERR_NOT_FOUND || ret == ESP_ERR_INVALID_STATE) {
-            maybe_log_mcu_obs_stats(mcu_link_bootstrap_get_link(), "periodic", false);
-            return;
-        }
-
-        ESP_LOGW(TAG, "MCU link runtime poll failed: %s", esp_err_to_name(ret));
-        maybe_log_mcu_obs_stats(mcu_link_bootstrap_get_link(), "poll_error", true);
-        return;
-    }
-}
-
-#if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
-static void mcu_link_runtime_task(void *arg) {
-    (void)arg;
-
-    while (true) {
-        service_mcu_link_runtime();
-        vTaskDelay(pdMS_TO_TICKS(MCU_LINK_RUNTIME_TASK_PERIOD_MS));
-    }
-}
-
-static void ensure_mcu_link_runtime_task_started(void) {
-    if (s_mcu_link_runtime_task != NULL) {
-        return;
-    }
-
-    if (xTaskCreate(mcu_link_runtime_task, "mcu_link_rt", 4096, NULL, 6, &s_mcu_link_runtime_task) != pdPASS) {
-        s_mcu_link_runtime_task = NULL;
-        ESP_LOGE(TAG, "Failed to create MCU link runtime task");
-    }
-}
-#endif
 
 // static void run_camera_boot_diag(void) {
 //     // Camera module intentionally disabled.
@@ -1621,42 +1315,21 @@ void app_main(void) {
     boot_anim_start_intro(EMOJI_ANIM_BOOT, boot_frame_count, BOOT_ANIM_INTERVAL_MS);
     boot_anim_set_text("Preparing...");
 
-    /* 4. Coprocessor link bootstrap (GPIO 19/20 runtime UART) */
+    /* 4. Servo HAL init (GPIO 19/20 LEDC PWM, Phase 2 implementation) */
     boot_anim_set_progress(25);
-    boot_anim_set_text("MCU Link...");
-    init_mcu_link_bootstrap();
-    init_mcu_runtime_services();
-
-    /* 4.5 Servo compatibility facade (no local PWM backend). */
     boot_anim_set_text("Servo...");
-    if (hal_servo_init() != ESP_OK) {
-        ESP_LOGE(TAG, "Servo facade init failed");
-        boot_halt_with_error("Servo init failed");
-    }
+    hal_servo_init();
 
     /* 5. Initialize app state only. Input devices stay disabled during BLE provisioning. */
     boot_anim_set_progress(30);
     boot_anim_set_text("State...");
-#if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
-    if (control_ingress_init() != ESP_OK) {
-        ESP_LOGE(TAG, "Control ingress init failed");
-        boot_halt_with_error("Control init failed");
-    }
-    stress_mode_start();
-    if (mcu_link_bootstrap_is_ready()) {
-        stress_mode_notify_ready();
-    }
-    LOG_HEAP_STATE("after_control_ingress");
-#endif
     behavior_state_init();
 
-#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
     if (control_ingress_init() != ESP_OK) {
         ESP_LOGE(TAG, "Control ingress init failed");
         boot_halt_with_error("Control init failed");
     }
     LOG_HEAP_STATE("after_control_ingress");
-#endif
 
     /* 5.5 BLE control + provisioning */
     boot_anim_set_progress(35);
@@ -1725,16 +1398,10 @@ void app_main(void) {
     esp_task_wdt_add(NULL);
     while (1) {
         esp_task_wdt_reset();
-#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
-        service_mcu_link_runtime();
-#endif
         transport_coordinator_tick();
         maybe_play_ble_connected_feedback();
         apply_idle_hint_if_needed();
         ws_tts_timeout_check();
-#if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
-        stress_mode_tick();
-#endif
-        vTaskDelay(pdMS_TO_TICKS(MAIN_LOOP_DELAY_MS));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }

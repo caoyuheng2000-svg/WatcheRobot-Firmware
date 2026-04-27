@@ -1166,11 +1166,13 @@ esp_err_t bsp_audio_init(const i2s_std_config_t *i2s_config) {
     if (i2s_tx_chan != NULL) {
         ESP_GOTO_ON_ERROR(i2s_channel_init_std_mode(i2s_tx_chan, p_i2s_cfg), err, TAG,
                           "I2S channel initialization failed");
+        ESP_GOTO_ON_ERROR(i2s_channel_enable(i2s_tx_chan), err, TAG, "I2S enabling failed");
     }
     if (i2s_rx_chan != NULL) {
         p_i2s_cfg->slot_cfg.slot_mask = I2S_STD_SLOT_RIGHT;
         ESP_GOTO_ON_ERROR(i2s_channel_init_std_mode(i2s_rx_chan, p_i2s_cfg), err, TAG,
                           "I2S channel initialization failed");
+        ESP_GOTO_ON_ERROR(i2s_channel_enable(i2s_rx_chan), err, TAG, "I2S enabling failed");
     }
 
     audio_codec_i2s_cfg_t i2s_cfg = {

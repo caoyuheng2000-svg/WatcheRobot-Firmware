@@ -16,17 +16,12 @@ set(EXTRA_COMPONENT_DIRS
     # Protocols
     "components/protocols/ble_service"
     "components/protocols/discovery"
-    "components/protocols/mcu_link"
     "components/protocols/ws_client"
     # Services
     "components/services/anim_service"
     "components/services/behavior_state_service"
     "components/services/camera_service"
     "components/services/control_ingress"
-    "components/services/mcu_led_service"
-    "components/services/mcu_motion_service"
-    "components/services/mcu_power_service"
-    "components/services/mcu_sensor_service"
     "components/services/ota_service"
     "components/services/sfx_service"
     "components/services/voice_service"
@@ -36,9 +31,6 @@ set(EXTRA_COMPONENT_DIRS
 )
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-if(CMAKE_BINARY_DIR MATCHES "build-s3-c-stress")
-    add_compile_definitions(WATCHER_STRESS_BUILD=1)
-endif()
 project(WatcheRobot-S3)
 # Keep custom generators on the same interpreter as the active ESP-IDF build.
 idf_build_get_property(project_python PYTHON)
