@@ -65,8 +65,7 @@ static const int s_x_track[] = {60, 90, 120};
 static const int s_y_track[] = {100, 120, 140};
 static size_t s_track_index = 0u;
 
-static stress_inflight_t *stress_find_inflight(uint32_t ref_seq)
-{
+static stress_inflight_t *stress_find_inflight(uint32_t ref_seq) {
     size_t index;
 
     for (index = 0u; index < WATCHER_STRESS_MAX_INFLIGHT; ++index) {
@@ -78,8 +77,7 @@ static stress_inflight_t *stress_find_inflight(uint32_t ref_seq)
     return NULL;
 }
 
-static bool stress_has_free_inflight_slot(void)
-{
+static bool stress_has_free_inflight_slot(void) {
     size_t index;
 
     for (index = 0u; index < WATCHER_STRESS_MAX_INFLIGHT; ++index) {
@@ -91,8 +89,7 @@ static bool stress_has_free_inflight_slot(void)
     return false;
 }
 
-static bool stress_track_inflight(uint32_t ref_seq)
-{
+static bool stress_track_inflight(uint32_t ref_seq) {
     size_t index;
 
     for (index = 0u; index < WATCHER_STRESS_MAX_INFLIGHT; ++index) {
@@ -107,8 +104,7 @@ static bool stress_track_inflight(uint32_t ref_seq)
     return false;
 }
 
-static size_t stress_active_inflight_count(void)
-{
+static size_t stress_active_inflight_count(void) {
     size_t index;
     size_t active_count = 0u;
 
@@ -121,16 +117,14 @@ static size_t stress_active_inflight_count(void)
     return active_count;
 }
 
-static void stress_reset_driver_state_locked(void)
-{
+static void stress_reset_driver_state_locked(void) {
     s_waiting_for_motion_ack = false;
     s_ready_since_us = 0;
     s_next_submit_us = 0;
     memset(s_inflight, 0, sizeof(s_inflight));
 }
 
-static void stress_snapshot_link_stats(stress_stats_t *snapshot)
-{
+static void stress_snapshot_link_stats(stress_stats_t *snapshot) {
     mcu_link_t *link = mcu_link_bootstrap_get_link();
     mcu_link_stats_t link_stats = {0};
 
@@ -145,8 +139,7 @@ static void stress_snapshot_link_stats(stress_stats_t *snapshot)
     snapshot->motion_done_fault_count = link_stats.motion_done_fault_count;
 }
 
-static void stress_copy_stats(stress_stats_t *out_stats)
-{
+static void stress_copy_stats(stress_stats_t *out_stats) {
     if (out_stats == NULL) {
         return;
     }
@@ -157,8 +150,7 @@ static void stress_copy_stats(stress_stats_t *out_stats)
     stress_snapshot_link_stats(out_stats);
 }
 
-static void stress_log_stats(const char *reason, bool force)
-{
+static void stress_log_stats(const char *reason, bool force) {
     stress_stats_t snapshot = {0};
     bool changed;
     bool periodic_due;
@@ -196,8 +188,7 @@ static void stress_log_stats(const char *reason, bool force)
     s_last_stats_log_us = now_us;
 }
 
-static bool stress_submit_next_servo_command(void)
-{
+static bool stress_submit_next_servo_command(void) {
     control_servo_request_t request = {
         .has_x = true,
         .has_y = true,
@@ -235,8 +226,7 @@ static bool stress_submit_next_servo_command(void)
     return true;
 }
 
-static void stress_drive_once(void)
-{
+static void stress_drive_once(void) {
     bool ready = mcu_link_bootstrap_is_ready();
     int64_t now_us = esp_timer_get_time();
     bool within_active_window;
@@ -278,8 +268,7 @@ static void stress_drive_once(void)
     }
 }
 
-static void stress_mode_task(void *arg)
-{
+static void stress_mode_task(void *arg) {
     (void)arg;
 
     while (true) {
@@ -288,8 +277,7 @@ static void stress_mode_task(void *arg)
     }
 }
 
-void stress_mode_init(void)
-{
+void stress_mode_init(void) {
     memset(&s_stats, 0, sizeof(s_stats));
     memset(&s_last_logged_stats, 0, sizeof(s_last_logged_stats));
     s_last_stats_log_us = 0;
@@ -302,8 +290,7 @@ void stress_mode_init(void)
     stress_log_stats("init", true);
 }
 
-void stress_mode_start(void)
-{
+void stress_mode_start(void) {
     if (s_stress_task != NULL) {
         return;
     }
@@ -314,8 +301,7 @@ void stress_mode_start(void)
     }
 }
 
-void stress_mode_notify_ready(void)
-{
+void stress_mode_notify_ready(void) {
     int64_t now_us = esp_timer_get_time();
 
     portENTER_CRITICAL(&s_stress_lock);
@@ -328,8 +314,7 @@ void stress_mode_notify_ready(void)
     portEXIT_CRITICAL(&s_stress_lock);
 }
 
-void stress_mode_on_link_event(const mcu_link_event_t *event)
-{
+void stress_mode_on_link_event(const mcu_link_event_t *event) {
     uint32_t ref_seq = 0u;
     stress_inflight_t *entry = NULL;
     const char *log_reason = NULL;
@@ -345,10 +330,8 @@ void stress_mode_on_link_event(const mcu_link_event_t *event)
     case MCU_LINK_RX_EVENT_NACK:
     case MCU_LINK_RX_EVENT_FAULT:
     case MCU_LINK_RX_EVENT_MOTION_DONE:
-        ref_seq = ((uint32_t)event->frame.payload[0]) |
-                  ((uint32_t)event->frame.payload[1] << 8u) |
-                  ((uint32_t)event->frame.payload[2] << 16u) |
-                  ((uint32_t)event->frame.payload[3] << 24u);
+        ref_seq = ((uint32_t)event->frame.payload[0]) | ((uint32_t)event->frame.payload[1] << 8u) |
+                  ((uint32_t)event->frame.payload[2] << 16u) | ((uint32_t)event->frame.payload[3] << 24u);
         break;
     default:
         break;
@@ -411,33 +394,23 @@ void stress_mode_on_link_event(const mcu_link_event_t *event)
     }
 }
 
-void stress_mode_tick(void)
-{
+void stress_mode_tick(void) {
     stress_drive_once();
     stress_log_stats("periodic", false);
 }
 
 #else
 
-void stress_mode_init(void)
-{
-}
+void stress_mode_init(void) {}
 
-void stress_mode_on_link_event(const mcu_link_event_t *event)
-{
+void stress_mode_on_link_event(const mcu_link_event_t *event) {
     (void)event;
 }
 
-void stress_mode_notify_ready(void)
-{
-}
+void stress_mode_notify_ready(void) {}
 
-void stress_mode_start(void)
-{
-}
+void stress_mode_start(void) {}
 
-void stress_mode_tick(void)
-{
-}
+void stress_mode_tick(void) {}
 
 #endif

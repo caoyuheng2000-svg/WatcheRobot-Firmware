@@ -1,162 +1,133 @@
-# STM32 协处理器 HIL 联调计划
+# STM32 协处理器 HIL 与合并前检查计划
 
-> 目的：定义 `ESP32 + STM32` 真机联调的最小拓扑、脚本入口、测试矩阵和通过标准。
+> 目的：统一 mock、格式、编译、bench 和真实串口联调的验证流程。
 
-## 1. 目标
+## 合并前本地检查
 
-HIL 测试只回答三件事：
+在 `v2.0.0-refactor` 上执行：
 
-- 协议在真 UART 链路上是否稳定
-- ESP32 在状态流压力下是否仍可控
-- 掉线、恢复、故障注入是否符合文档定义
+```powershell
+git diff --check 5929987..HEAD
+python -m pytest tools\tests
+powershell -ExecutionPolicy Bypass -File C:\Users\50533\.codex\skills\watche-dual-mcu-bringup\scripts\run-dual-mcu-bringup.ps1 -SkipStm32Build -SkipStm32Flash -SkipEsp32Flash -SkipSession
+```
 
-## 2. 测试拓扑
+对 CI 范围的 C/H 文件执行格式检查：
 
-推荐拓扑：
+```powershell
+$clang = 'C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\Llvm\bin\clang-format.exe'
+$files = git diff --name-only 5929987..HEAD -- firmware/s3/components firmware/s3/main | Where-Object { $_ -match '\.(c|h)$' }
+& $clang --dry-run --Werror @files
+```
+
+CI 中对应的 Linux 检查使用 `clang-format-18 --dry-run --Werror`。
+
+## Mock 与工具测试
+
+必须保持以下工具可运行：
+
+- `tools/stm32_uart_hil.py`
+- `tools/stm32_uart_fault_inject.py`
+- `tools/power_5v_toggle_hil.py`
+
+最低 Python 回归入口：
+
+```powershell
+python -m pytest tools\tests
+```
+
+## ESP32 编译
+
+推荐使用技能脚本，而不是手工拼 ESP-IDF 环境：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\Users\50533\.codex\skills\watche-dual-mcu-bringup\scripts\run-dual-mcu-bringup.ps1 -SkipStm32Build -SkipStm32Flash -SkipEsp32Flash -SkipSession
+```
+
+该命令只编译 ESP32，默认 build dir 为：
+
+- `firmware\s3\build-s3-c-codex`
+
+## 真实 bench 拓扑
 
 ```text
 PC
  |\
- | \-- UART / log capture -> ESP32
+ | \-- ESP32 log / flash port
  |
- +---- control script -> ESP32 / STM32 pair
+ +---- STM32 debug or CLI port
 
 ESP32 <---- UART 921600 ----> STM32
 ```
 
-建议同时保留：
+默认设备别名：
 
-- ESP32 日志串口
-- STM32 调试串口或半主机输出
+- ESP32：`s3-c`
+- STM32：`stm32-c`
 
-若只能保留一路日志，则优先保留 ESP32 侧日志，并在 STM32 端回传关键错误码。
+## bench 固定顺序
 
-## 3. 工具与脚本
+1. 链路启动
+   - ESP32 日志出现 `MCU link scaffold ready`
+   - `HELLO_REQ` 发出
+   - STM32 返回 `HELLO_RSP`
+   - ESP32 进入 `READY`
+2. 动作链路
+   - 下发 `SERVO_MOVE`
+   - 观察 `ACK`
+   - 观察 `MOTION_DONE`
+   - 下发 `SERVO_STOP`
+3. 灯效链路
+   - 下发 `LED_SET_STATIC` 或 `LED_SET_EFFECT`
+   - 观察 `ACK`
+   - 观察 `LED_DONE`
+4. POWER 5V 链路
+   - 下发 `POWER_5V_ENABLE / POWER_5V_DISABLE`
+   - 判据是 STM32 侧舵机 / WS2812 LED 5V rail 或 IP5306 输出端变化
+   - ESP32 USB-C 日志串口继续在线是预期现象
+5. 传感器链路
+   - 观察 `TOUCH_EVENT`
+   - 观察 `MAG_STATE`
+   - `IMU_STATE` 只在问询或姿态变化事件场景单独验证
+6. 恢复链路
+   - 复位 STM32
+   - ESP32 回到 `READY`
+   - 恢复后 motion / led / sensor 至少各跑通 1 条链路
 
-建议新增：
+## 标准压力场景
 
-- `tools/stm32_uart_hil.py`
-  - 主联调脚本
-- `tools/stm32_uart_fault_inject.py`
-  - 可选故障注入工具
+- 固定为 `SERVO_MOVE 5Hz + TOUCH_EVENT burst + MAG_STATE 2Hz`
+- 当前标准压力场景不要求持续 `IMU_STATE`
+- stress build 在 `READY` 后等待 `1s` settle 再开始发送
+- 收尾必须出现 `MCU_OBS evt=stress_stats reason=drain_complete`
+- `servo_submit_count / motion_ack_count / motion_done_count` 必须对齐
 
-脚本输出统一结构：
+## 通过标准
 
-- `scenario`
-- `result`
-- `ack_timeout_count`
-- `crc_error_count`
-- `dropped_state_count`
-- `reconnect_count`
-- `motion_done_fault_count`
-- `notes`
+- 连续运行 `10 min` 不出现未恢复卡死。
+- 错帧注入后链路能自动重同步。
+- `ACK timeout` 不持续上升。
+- `dropped_state_count` 可增长，但 `ACK / DONE / FAULT` 不应明显丢失。
+- STM32 复位后 ESP32 能重新回到 `READY`。
 
-## 4. 用例矩阵
+## 日志记录要求
 
-### 4.1 冒烟用例
+每次真实 bench 至少记录：
 
-- `hello_heartbeat_smoke`
-  - 验证握手、心跳、能力位
-- `servo_move_ack_done`
-  - 验证动作 accepted 和完成事件
-- `led_effect_ack_done`
-  - 验证灯效 accepted 和完成事件
-- `power_5v_enable_disable`
-  - 验证 ESP32 可下发 `POWER_5V_ENABLE / POWER_5V_DISABLE`，STM32 可 ACK 并执行 IP5306 KEY 脉冲
-  - 判据是 STM32 侧舵机 / WS2812 LED 5V rail 或 IP5306 输出端变化
-  - ESP32 由 USB-C 5V 供电，执行 disable 后 ESP32 日志串口保持在线是预期现象
-- `touch_press_release`
-  - 验证触摸事件链路
+- 日期、分支、commit
+- ESP32 固件版本
+- STM32 固件版本
+- 设备别名和串口
+- 成功链路
+- 失败链路
+- 对应日志目录
+- 是否需要更新协议、风险或 TODO
 
-### 4.2 回归用例
+## 最新已知通过样本
 
-- `servo_stop_interrupt`
-- `imu_state_event_driven`
-  - 仅验证“问询触发”或“STM32 判定姿态变化事件触发”的上报路径
-  - 不作为当前标准压力场景的常开状态流
-- `mag_state_rate_2hz`
-- `coproc_reset_recovery`
-- `snapshot_restore`
-  - 仅在 `capability_bitmap.bit5(snapshot) = 1` 时执行
-- `baseline_restore_without_snapshot`
-  - 仅在 `capability_bitmap.bit5(snapshot) = 0` 时执行
+截至 `2026-04-19`，no-IMU 标准压力场景通过样本为：
 
-### 4.3 故障注入用例
-
-- `crc_fault_injection`
-- `truncated_frame_injection`
-- `ack_timeout_simulation`
-- `heartbeat_loss_simulation`
-- `busy_nack_path`
-
-## 5. 通过标准
-
-### 5.1 协议稳定性
-
-- 连续运行 `10 min` 不出现未恢复卡死
-- 错帧注入后链路能自动重同步
-- `ACK timeout` 不出现持续上升趋势
-- POWER 用例中 ESP32 不应作为被断电负载；disable 后继续输出日志不计为失败
-
-### 5.2 背压稳定性
-
-- 当前标准压力场景固定为 `SERVO_MOVE 5Hz + TOUCH_EVENT burst + MAG_STATE 2Hz`
-- `IMU_STATE` 不再作为本轮标准压力场景的持续上报项
-- 若后续增加姿态问询或姿态变化事件场景，则单独验证 `IMU_STATE` 的事件驱动上报延迟与正确性
-- stress build 下，`behavior_state_service` 只保留显示/音频状态推进，不再向舵机链路发本地 behavior motion
-- stress build 在 `READY` 后额外预留 `1s` settle 窗口，再开始第一笔 `SERVO_MOVE`
-- 标准压力场景在主动发送窗口结束后，必须输出一次 `MCU_OBS evt=stress_stats reason=drain_complete`，用于收尾对齐 `submit / ack / done`
-- 状态流拥塞时，`dropped_state_count` 可增长，但 `ACK/DONE/FAULT` 不应明显丢失
-
-### 5.3 恢复能力
-
-- STM32 复位后，ESP32 能回到 `READY`
-- 恢复后能重新执行动作和灯效命令
-
-## 6. 测试节奏
-
-建议节奏：
-
-- 每日开发：跑冒烟用例
-- 阶段合并前：跑回归用例
-- 协议或链路层改动后：跑故障注入用例
-
-## 7. 从 mock 切到真实 serial 前的前置条件
-
-切到真实 STM32 串口 HIL 之前，ESP32 侧至少需要满足：
-
-- `mcu_link` live frame 已能进入 motion / led / sensor service
-- `READY` 已来自正式 baseline restore，而不是临时 bootstrap 兜底
-- `ack_timeout_count / reconnect_count / motion_done_fault_count / dropped_state_count` 可稳定输出
-- bench 执行顺序已冻结，参见 [FIELD_REVIEW_TODO.md](./FIELD_REVIEW_TODO.md)
-
-## 8. 日志要求
-
-ESP32 日志至少包含：
-
-- `seq`
-- `msg_class`
-- `msg_id`
-- `ref_seq`
-- `reason_code`
-- `fault_source`
-
-HIL 日志输出中不得只写“失败”，必须带可定位字段。
-
-## 9. 非目标
-
-本计划不覆盖：
-
-- BLE / WS 端到端云联调
-- STM32 固件升级联调
-- 视觉协处理器链路
-
-## 10. 当前已验证基线
-
-截至 `2026-04-19`，当前 no-IMU 标准压力场景的最新有效通过样本为：
-
-- session：`D:\GithubRep\WatcheRobot-Firmware\.codex\local\logs\50533\stm32-uart2-stress-no-imu\s3-c--stm32-c\session-20260419T053521Z`
-- 结果：`stress_standard -> passed`
+- `D:\GithubRep\WatcheRobot-Firmware\.codex\local\logs\50533\stm32-uart2-stress-no-imu\s3-c--stm32-c\session-20260419T053521Z`
 
 关键指标：
 

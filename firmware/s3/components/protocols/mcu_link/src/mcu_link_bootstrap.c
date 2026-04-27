@@ -16,8 +16,7 @@ static mcu_link_t s_link;
 static bool s_link_initialized;
 static int64_t s_last_hello_req_us;
 
-static esp_err_t mcu_link_bootstrap_send_hello_req(void)
-{
+static esp_err_t mcu_link_bootstrap_send_hello_req(void) {
     uint32_t seq = 0u;
     size_t wire_len = 0u;
     esp_err_t ret;
@@ -31,18 +30,15 @@ static esp_err_t mcu_link_bootstrap_send_hello_req(void)
     s_last_hello_req_us = esp_timer_get_time();
     ESP_LOGI(TAG, "MCU link hello request queued (seq=%lu wire_len=%u state=%d)", (unsigned long)seq,
              (unsigned)wire_len, (int)mcu_link_get_state(&s_link));
-    ESP_LOGI(OBS_TAG, "evt=hello_req seq=%lu msg_class=%u msg_id=%u link_state=%d",
-             (unsigned long)seq, (unsigned)MCU_FRAME_CLASS_SYS, (unsigned)MCU_SYS_MSG_HELLO_REQ,
-             (int)mcu_link_get_state(&s_link));
+    ESP_LOGI(OBS_TAG, "evt=hello_req seq=%lu msg_class=%u msg_id=%u link_state=%d", (unsigned long)seq,
+             (unsigned)MCU_FRAME_CLASS_SYS, (unsigned)MCU_SYS_MSG_HELLO_REQ, (int)mcu_link_get_state(&s_link));
     return ESP_OK;
 }
 
-static bool mcu_link_bootstrap_hello_retry_due(void)
-{
+static bool mcu_link_bootstrap_hello_retry_due(void) {
     const mcu_link_state_t state = mcu_link_get_state(&s_link);
 
-    if (state != MCU_LINK_STATE_HANDSHAKING && state != MCU_LINK_STATE_DEGRADED &&
-        state != MCU_LINK_STATE_RECOVERING) {
+    if (state != MCU_LINK_STATE_HANDSHAKING && state != MCU_LINK_STATE_DEGRADED && state != MCU_LINK_STATE_RECOVERING) {
         return false;
     }
 
@@ -53,8 +49,7 @@ static bool mcu_link_bootstrap_hello_retry_due(void)
     return (esp_timer_get_time() - s_last_hello_req_us) >= HELLO_RETRY_INTERVAL_US;
 }
 
-static esp_err_t mcu_link_bootstrap_init_uart(void)
-{
+static esp_err_t mcu_link_bootstrap_init_uart(void) {
 #ifdef CONFIG_WATCHER_MCU_LINK_UART_ENABLE
     const mcu_link_uart_config_t config = {
         .port = (uart_port_t)CONFIG_WATCHER_MCU_LINK_UART_PORT_NUM,
@@ -71,8 +66,7 @@ static esp_err_t mcu_link_bootstrap_init_uart(void)
 #endif
 }
 
-esp_err_t mcu_link_bootstrap_init(void)
-{
+esp_err_t mcu_link_bootstrap_init(void) {
     esp_err_t ret;
 
     if (s_link_initialized) {
@@ -94,27 +88,24 @@ esp_err_t mcu_link_bootstrap_init(void)
     s_link_initialized = true;
     s_last_hello_req_us = 0;
     ESP_LOGI(TAG, "MCU link bootstrap initialized (uart_ready=%d link_ready=%d ready=%d)",
-             mcu_link_uart_is_ready() ? 1 : 0, mcu_link_is_link_ready(&s_link) ? 1 : 0, mcu_link_is_ready(&s_link) ? 1 : 0);
+             mcu_link_uart_is_ready() ? 1 : 0, mcu_link_is_link_ready(&s_link) ? 1 : 0,
+             mcu_link_is_ready(&s_link) ? 1 : 0);
     return ESP_OK;
 }
 
-mcu_link_t *mcu_link_bootstrap_get_link(void)
-{
+mcu_link_t *mcu_link_bootstrap_get_link(void) {
     return s_link_initialized ? &s_link : NULL;
 }
 
-bool mcu_link_bootstrap_is_link_ready(void)
-{
+bool mcu_link_bootstrap_is_link_ready(void) {
     return s_link_initialized && mcu_link_is_link_ready(&s_link);
 }
 
-bool mcu_link_bootstrap_is_ready(void)
-{
+bool mcu_link_bootstrap_is_ready(void) {
     return s_link_initialized && mcu_link_is_ready(&s_link);
 }
 
-esp_err_t mcu_link_bootstrap_poll(mcu_link_event_t *out_event)
-{
+esp_err_t mcu_link_bootstrap_poll(mcu_link_event_t *out_event) {
     mcu_link_event_t local_event;
     if (!s_link_initialized) {
         return ESP_ERR_INVALID_STATE;
@@ -144,8 +135,7 @@ esp_err_t mcu_link_bootstrap_poll(mcu_link_event_t *out_event)
     return ESP_ERR_NOT_FOUND;
 }
 
-esp_err_t mcu_link_bootstrap_start(void)
-{
+esp_err_t mcu_link_bootstrap_start(void) {
     if (!s_link_initialized) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -158,7 +148,6 @@ esp_err_t mcu_link_bootstrap_start(void)
     return mcu_link_bootstrap_send_hello_req();
 }
 
-mcu_link_state_t mcu_link_bootstrap_get_state(void)
-{
+mcu_link_state_t mcu_link_bootstrap_get_state(void) {
     return s_link_initialized ? mcu_link_get_state(&s_link) : MCU_LINK_STATE_DOWN;
 }

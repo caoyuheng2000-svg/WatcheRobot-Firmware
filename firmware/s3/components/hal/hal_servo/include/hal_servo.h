@@ -63,15 +63,10 @@ esp_err_t hal_servo_set_angle(servo_axis_t axis, int angle_deg);
  * @return ESP_OK on success
  */
 esp_err_t hal_servo_move_smooth(servo_axis_t axis, int angle_deg, int duration_ms);
-esp_err_t hal_servo_move_smooth_with_source(servo_axis_t axis,
-                                            int angle_deg,
-                                            int duration_ms,
+esp_err_t hal_servo_move_smooth_with_source(servo_axis_t axis, int angle_deg, int duration_ms,
                                             hal_servo_motion_source_t source);
-esp_err_t hal_servo_move_smooth_with_source_and_seq(servo_axis_t axis,
-                                                    int angle_deg,
-                                                    int duration_ms,
-                                                    hal_servo_motion_source_t source,
-                                                    uint32_t *out_seq);
+esp_err_t hal_servo_move_smooth_with_source_and_seq(servo_axis_t axis, int angle_deg, int duration_ms,
+                                                    hal_servo_motion_source_t source, uint32_t *out_seq);
 
 /**
  * @brief Move both axes simultaneously.
@@ -84,15 +79,9 @@ esp_err_t hal_servo_move_smooth_with_source_and_seq(servo_axis_t axis,
  * @return ESP_OK on success
  */
 esp_err_t hal_servo_move_sync(int x_deg, int y_deg, int duration_ms);
-esp_err_t hal_servo_move_sync_with_source(int x_deg,
-                                          int y_deg,
-                                          int duration_ms,
-                                          hal_servo_motion_source_t source);
-esp_err_t hal_servo_move_sync_with_source_and_seq(int x_deg,
-                                                  int y_deg,
-                                                  int duration_ms,
-                                                  hal_servo_motion_source_t source,
-                                                  uint32_t *out_seq);
+esp_err_t hal_servo_move_sync_with_source(int x_deg, int y_deg, int duration_ms, hal_servo_motion_source_t source);
+esp_err_t hal_servo_move_sync_with_source_and_seq(int x_deg, int y_deg, int duration_ms,
+                                                  hal_servo_motion_source_t source, uint32_t *out_seq);
 
 /**
  * @brief Send servo command by axis name string (for WebSocket handler).

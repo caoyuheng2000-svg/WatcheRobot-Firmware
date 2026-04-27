@@ -12,7 +12,7 @@ Accepted
 - 不依赖复杂分片
 - 在 `STM32F103` 级资源上也能稳定实现
 
-如果只用 `magic` 扫描，串口噪声、截断帧和粘包时重同步口径较弱。  
+如果只用 `magic` 扫描，串口噪声、截断帧和粘包时重同步口径较弱。
 如果直接上文本协议，可读性更强，但效率、字段约束和恢复性更差。
 
 ## Decision
@@ -40,5 +40,4 @@ Accepted
 ## Related
 
 - `../STM32_UART_PROTOCOL.md`
-- `../TDD_EXECUTION_PLAN.md`
-
+- `../HIL_TEST_PLAN.md`

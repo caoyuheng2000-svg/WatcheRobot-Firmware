@@ -14,8 +14,7 @@ typedef struct {
 
 static mcu_link_uart_state_t s_uart;
 
-esp_err_t mcu_link_uart_init(const mcu_link_uart_config_t *config)
-{
+esp_err_t mcu_link_uart_init(const mcu_link_uart_config_t *config) {
     uart_config_t uart_config = {0};
     esp_err_t ret;
 
@@ -36,11 +35,12 @@ esp_err_t mcu_link_uart_init(const mcu_link_uart_config_t *config)
     uart_config.source_clk = UART_SCLK_DEFAULT;
 
     ESP_RETURN_ON_ERROR(uart_param_config(config->port, &uart_config), TAG, "uart_param_config failed");
-    ESP_RETURN_ON_ERROR(uart_set_pin(config->port, config->tx_io_num, config->rx_io_num, UART_PIN_NO_CHANGE,
-                                     UART_PIN_NO_CHANGE),
-                        TAG, "uart_set_pin failed");
+    ESP_RETURN_ON_ERROR(
+        uart_set_pin(config->port, config->tx_io_num, config->rx_io_num, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE), TAG,
+        "uart_set_pin failed");
 
-    ret = uart_driver_install(config->port, config->rx_buffer_size, config->tx_buffer_size, 0, NULL, ESP_INTR_FLAG_SHARED);
+    ret = uart_driver_install(config->port, config->rx_buffer_size, config->tx_buffer_size, 0, NULL,
+                              ESP_INTR_FLAG_SHARED);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "uart_driver_install failed: %s", esp_err_to_name(ret));
         return ret;
@@ -49,13 +49,11 @@ esp_err_t mcu_link_uart_init(const mcu_link_uart_config_t *config)
     s_uart.ready = true;
     s_uart.config = *config;
     ESP_LOGI(TAG, "Runtime UART ready: uart=%d tx=%d rx=%d baud=%d rx_buf=%d tx_buf=%d", (int)config->port,
-             config->tx_io_num, config->rx_io_num, config->baud_rate, config->rx_buffer_size,
-             config->tx_buffer_size);
+             config->tx_io_num, config->rx_io_num, config->baud_rate, config->rx_buffer_size, config->tx_buffer_size);
     return ESP_OK;
 }
 
-void mcu_link_uart_deinit(void)
-{
+void mcu_link_uart_deinit(void) {
     if (!s_uart.ready) {
         return;
     }
@@ -64,18 +62,15 @@ void mcu_link_uart_deinit(void)
     memset(&s_uart, 0, sizeof(s_uart));
 }
 
-bool mcu_link_uart_is_ready(void)
-{
+bool mcu_link_uart_is_ready(void) {
     return s_uart.ready;
 }
 
-uart_port_t mcu_link_uart_get_port(void)
-{
+uart_port_t mcu_link_uart_get_port(void) {
     return s_uart.ready ? s_uart.config.port : UART_NUM_MAX;
 }
 
-esp_err_t mcu_link_uart_write(const uint8_t *data, size_t data_len, size_t *out_written)
-{
+esp_err_t mcu_link_uart_write(const uint8_t *data, size_t data_len, size_t *out_written) {
     int written;
 
     ESP_RETURN_ON_FALSE(data != NULL, ESP_ERR_INVALID_ARG, TAG, "missing data");
@@ -95,8 +90,7 @@ esp_err_t mcu_link_uart_write(const uint8_t *data, size_t data_len, size_t *out_
     return written == (int)data_len ? ESP_OK : ESP_ERR_INVALID_SIZE;
 }
 
-esp_err_t mcu_link_uart_read(uint8_t *buffer, size_t buffer_len, uint32_t timeout_ms, size_t *out_read)
-{
+esp_err_t mcu_link_uart_read(uint8_t *buffer, size_t buffer_len, uint32_t timeout_ms, size_t *out_read) {
     int read_len;
     TickType_t ticks = pdMS_TO_TICKS(timeout_ms);
 
@@ -117,8 +111,7 @@ esp_err_t mcu_link_uart_read(uint8_t *buffer, size_t buffer_len, uint32_t timeou
     return ESP_OK;
 }
 
-esp_err_t mcu_link_uart_get_buffered_bytes(size_t *out_bytes)
-{
+esp_err_t mcu_link_uart_get_buffered_bytes(size_t *out_bytes) {
     size_t buffered = 0u;
 
     ESP_RETURN_ON_FALSE(out_bytes != NULL, ESP_ERR_INVALID_ARG, TAG, "missing out_bytes");

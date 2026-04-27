@@ -22,12 +22,9 @@ typedef struct {
     size_t wire_len;
 } mcu_link_test_packet_t;
 
-esp_err_t mcu_link_test_support_make_packet(const mcu_frame_header_t *header,
-                                            const uint8_t *payload,
+esp_err_t mcu_link_test_support_make_packet(const mcu_frame_header_t *header, const uint8_t *payload,
                                             mcu_link_test_packet_t *packet);
-esp_err_t mcu_link_test_support_parse_packet(const uint8_t *wire,
-                                             size_t wire_len,
-                                             mcu_frame_t *frame);
+esp_err_t mcu_link_test_support_parse_packet(const uint8_t *wire, size_t wire_len, mcu_frame_t *frame);
 
 #ifdef __cplusplus
 }

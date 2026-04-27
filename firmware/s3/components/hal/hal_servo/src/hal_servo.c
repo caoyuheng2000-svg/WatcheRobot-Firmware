@@ -23,25 +23,23 @@ static bool s_initialized = false;
 static SemaphoreHandle_t s_angle_mutex = NULL;
 static int s_angle[2] = {SERVO_X_DEFAULT_DEG, SERVO_Y_DEFAULT_DEG};
 
-static mcu_motion_source_t servo_source_to_mcu(hal_servo_motion_source_t source)
-{
+static mcu_motion_source_t servo_source_to_mcu(hal_servo_motion_source_t source) {
     switch (source) {
-        case HAL_SERVO_MOTION_SOURCE_BEHAVIOR:
-            return MCU_MOTION_SOURCE_BEHAVIOR;
-        case HAL_SERVO_MOTION_SOURCE_BLE:
-            return MCU_MOTION_SOURCE_BLE;
-        case HAL_SERVO_MOTION_SOURCE_WS:
-            return MCU_MOTION_SOURCE_WS;
-        case HAL_SERVO_MOTION_SOURCE_RECOVERY:
-            return MCU_MOTION_SOURCE_RECOVERY;
-        case HAL_SERVO_MOTION_SOURCE_UNKNOWN:
-        default:
-            return MCU_MOTION_SOURCE_UNKNOWN;
+    case HAL_SERVO_MOTION_SOURCE_BEHAVIOR:
+        return MCU_MOTION_SOURCE_BEHAVIOR;
+    case HAL_SERVO_MOTION_SOURCE_BLE:
+        return MCU_MOTION_SOURCE_BLE;
+    case HAL_SERVO_MOTION_SOURCE_WS:
+        return MCU_MOTION_SOURCE_WS;
+    case HAL_SERVO_MOTION_SOURCE_RECOVERY:
+        return MCU_MOTION_SOURCE_RECOVERY;
+    case HAL_SERVO_MOTION_SOURCE_UNKNOWN:
+    default:
+        return MCU_MOTION_SOURCE_UNKNOWN;
     }
 }
 
-static int servo_clamp_angle(servo_axis_t axis, int angle_deg)
-{
+static int servo_clamp_angle(servo_axis_t axis, int angle_deg) {
     if (angle_deg < 0) {
         angle_deg = 0;
     }
@@ -61,13 +59,8 @@ static int servo_clamp_angle(servo_axis_t axis, int angle_deg)
     return angle_deg;
 }
 
-static esp_err_t servo_build_motion_request(uint8_t axis_mask,
-                                            int x_deg,
-                                            int y_deg,
-                                            int duration_ms,
-                                            hal_servo_motion_source_t source,
-                                            mcu_motion_request_t *out_request)
-{
+static esp_err_t servo_build_motion_request(uint8_t axis_mask, int x_deg, int y_deg, int duration_ms,
+                                            hal_servo_motion_source_t source, mcu_motion_request_t *out_request) {
     if (out_request == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -83,15 +76,14 @@ static esp_err_t servo_build_motion_request(uint8_t axis_mask,
     out_request->axis_mask = axis_mask;
     out_request->x_deg_x10 = (axis_mask & MCU_MOTION_AXIS_X) != 0U ? (int16_t)(x_deg * 10) : 0;
     out_request->y_deg_x10 = (axis_mask & MCU_MOTION_AXIS_Y) != 0U ? (int16_t)(y_deg * 10) : 0;
-    out_request->duration_ms =
-        (uint16_t)((duration_ms <= 0) ? SERVO_IMMEDIATE_DURATION_MS : (duration_ms > UINT16_MAX ? UINT16_MAX : duration_ms));
+    out_request->duration_ms = (uint16_t)((duration_ms <= 0) ? SERVO_IMMEDIATE_DURATION_MS
+                                                             : (duration_ms > UINT16_MAX ? UINT16_MAX : duration_ms));
     out_request->motion_profile = MCU_MOTION_PROFILE_LINEAR;
     out_request->source = servo_source_to_mcu(source);
     return ESP_OK;
 }
 
-static void servo_cache_angle(servo_axis_t axis, int angle_deg)
-{
+static void servo_cache_angle(servo_axis_t axis, int angle_deg) {
     if (s_angle_mutex == NULL) {
         return;
     }
@@ -102,8 +94,7 @@ static void servo_cache_angle(servo_axis_t axis, int angle_deg)
     }
 }
 
-static void servo_cache_sync_angles(int x_deg, int y_deg)
-{
+static void servo_cache_sync_angles(int x_deg, int y_deg) {
     if (s_angle_mutex == NULL) {
         return;
     }
@@ -115,8 +106,7 @@ static void servo_cache_sync_angles(int x_deg, int y_deg)
     }
 }
 
-esp_err_t hal_servo_init(void)
-{
+esp_err_t hal_servo_init(void) {
     esp_err_t ret;
 
     if (s_initialized) {
@@ -138,36 +128,26 @@ esp_err_t hal_servo_init(void)
     }
 
     s_initialized = true;
-    ESP_LOGI(TAG,
-             "Servo HAL initialized in coprocessor facade mode; GPIO19/GPIO20 are reserved for mcu_link UART");
+    ESP_LOGI(TAG, "Servo HAL initialized in coprocessor facade mode; GPIO19/GPIO20 are reserved for mcu_link UART");
     return ESP_OK;
 }
 
-esp_err_t hal_servo_set_angle(servo_axis_t axis, int angle_deg)
-{
+esp_err_t hal_servo_set_angle(servo_axis_t axis, int angle_deg) {
     return hal_servo_move_smooth_with_source(axis, angle_deg, SERVO_IMMEDIATE_DURATION_MS,
                                              HAL_SERVO_MOTION_SOURCE_UNKNOWN);
 }
 
-esp_err_t hal_servo_move_smooth(servo_axis_t axis, int angle_deg, int duration_ms)
-{
+esp_err_t hal_servo_move_smooth(servo_axis_t axis, int angle_deg, int duration_ms) {
     return hal_servo_move_smooth_with_source(axis, angle_deg, duration_ms, HAL_SERVO_MOTION_SOURCE_UNKNOWN);
 }
 
-esp_err_t hal_servo_move_smooth_with_source(servo_axis_t axis,
-                                            int angle_deg,
-                                            int duration_ms,
-                                            hal_servo_motion_source_t source)
-{
+esp_err_t hal_servo_move_smooth_with_source(servo_axis_t axis, int angle_deg, int duration_ms,
+                                            hal_servo_motion_source_t source) {
     return hal_servo_move_smooth_with_source_and_seq(axis, angle_deg, duration_ms, source, NULL);
 }
 
-esp_err_t hal_servo_move_smooth_with_source_and_seq(servo_axis_t axis,
-                                                    int angle_deg,
-                                                    int duration_ms,
-                                                    hal_servo_motion_source_t source,
-                                                    uint32_t *out_seq)
-{
+esp_err_t hal_servo_move_smooth_with_source_and_seq(servo_axis_t axis, int angle_deg, int duration_ms,
+                                                    hal_servo_motion_source_t source, uint32_t *out_seq) {
     mcu_motion_request_t request;
     esp_err_t ret;
     int clamped_angle;
@@ -186,8 +166,8 @@ esp_err_t hal_servo_move_smooth_with_source_and_seq(servo_axis_t axis,
 
     clamped_angle = servo_clamp_angle(axis, angle_deg);
     ret = servo_build_motion_request(axis == SERVO_AXIS_X ? MCU_MOTION_AXIS_X : MCU_MOTION_AXIS_Y,
-                                     axis == SERVO_AXIS_X ? clamped_angle : 0,
-                                     axis == SERVO_AXIS_Y ? clamped_angle : 0, duration_ms, source, &request);
+                                     axis == SERVO_AXIS_X ? clamped_angle : 0, axis == SERVO_AXIS_Y ? clamped_angle : 0,
+                                     duration_ms, source, &request);
     if (ret != ESP_OK) {
         return ret;
     }
@@ -207,25 +187,16 @@ esp_err_t hal_servo_move_smooth_with_source_and_seq(servo_axis_t axis,
     return ESP_OK;
 }
 
-esp_err_t hal_servo_move_sync(int x_deg, int y_deg, int duration_ms)
-{
+esp_err_t hal_servo_move_sync(int x_deg, int y_deg, int duration_ms) {
     return hal_servo_move_sync_with_source(x_deg, y_deg, duration_ms, HAL_SERVO_MOTION_SOURCE_UNKNOWN);
 }
 
-esp_err_t hal_servo_move_sync_with_source(int x_deg,
-                                          int y_deg,
-                                          int duration_ms,
-                                          hal_servo_motion_source_t source)
-{
+esp_err_t hal_servo_move_sync_with_source(int x_deg, int y_deg, int duration_ms, hal_servo_motion_source_t source) {
     return hal_servo_move_sync_with_source_and_seq(x_deg, y_deg, duration_ms, source, NULL);
 }
 
-esp_err_t hal_servo_move_sync_with_source_and_seq(int x_deg,
-                                                  int y_deg,
-                                                  int duration_ms,
-                                                  hal_servo_motion_source_t source,
-                                                  uint32_t *out_seq)
-{
+esp_err_t hal_servo_move_sync_with_source_and_seq(int x_deg, int y_deg, int duration_ms,
+                                                  hal_servo_motion_source_t source, uint32_t *out_seq) {
     mcu_motion_request_t request;
     esp_err_t ret;
     int clamped_x;
@@ -263,8 +234,7 @@ esp_err_t hal_servo_move_sync_with_source_and_seq(int x_deg,
     return ESP_OK;
 }
 
-esp_err_t hal_servo_send_cmd(const char *id, int angle_deg, int duration_ms)
-{
+esp_err_t hal_servo_send_cmd(const char *id, int angle_deg, int duration_ms) {
     servo_axis_t axis;
     char upper;
 
@@ -284,13 +254,11 @@ esp_err_t hal_servo_send_cmd(const char *id, int angle_deg, int duration_ms)
     return hal_servo_move_smooth(axis, angle_deg, duration_ms);
 }
 
-esp_err_t hal_servo_cancel_all(void)
-{
+esp_err_t hal_servo_cancel_all(void) {
     return hal_servo_cancel_all_with_source(HAL_SERVO_MOTION_SOURCE_UNKNOWN);
 }
 
-esp_err_t hal_servo_cancel_all_with_source(hal_servo_motion_source_t source)
-{
+esp_err_t hal_servo_cancel_all_with_source(hal_servo_motion_source_t source) {
     if (!s_initialized) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -298,8 +266,7 @@ esp_err_t hal_servo_cancel_all_with_source(hal_servo_motion_source_t source)
     return mcu_motion_stop(servo_source_to_mcu(source));
 }
 
-int hal_servo_get_angle(servo_axis_t axis)
-{
+int hal_servo_get_angle(servo_axis_t axis) {
     int angle = -1;
 
     if (!s_initialized) {

@@ -1,7 +1,6 @@
 #include "mcu_crc16.h"
 
-uint16_t mcu_crc16_ccitt_false_update(uint16_t seed, const void *data, size_t len)
-{
+uint16_t mcu_crc16_ccitt_false_update(uint16_t seed, const void *data, size_t len) {
     const uint8_t *bytes = (const uint8_t *)data;
     uint16_t crc = seed;
 
@@ -23,7 +22,6 @@ uint16_t mcu_crc16_ccitt_false_update(uint16_t seed, const void *data, size_t le
     return crc;
 }
 
-uint16_t mcu_crc16_ccitt_false(const void *data, size_t len)
-{
+uint16_t mcu_crc16_ccitt_false(const void *data, size_t len) {
     return mcu_crc16_ccitt_false_update(MCU_CRC16_CCITT_FALSE_INIT, data, len);
 }
