@@ -27,6 +27,7 @@
 #include "ota_service.h"
 #include "mcu_link_bootstrap.h"
 #include "mcu_motion_service.h"
+#include "mcu_power_service.h"
 #include "mcu_sensor_service.h"
 #include "sensecap-watcher.h"
 #include "stress_mode.h"
@@ -662,6 +663,12 @@ static void init_mcu_runtime_services(void) {
         boot_halt_with_error("MCU sensor init failed");
     }
 
+    ret = mcu_power_service_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "MCU power service init failed: %s", esp_err_to_name(ret));
+        boot_halt_with_error("MCU power init failed");
+    }
+
     stress_mode_init();
 #if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
     ensure_mcu_link_runtime_task_started();
@@ -748,6 +755,7 @@ static void dispatch_mcu_link_runtime_event(const mcu_link_event_t *event) {
     maybe_complete_mcu_link_baseline_restore(event);
     (void)mcu_motion_service_handle_link_event(event);
     (void)mcu_led_service_handle_link_event(event);
+    (void)mcu_power_service_handle_link_event(event);
     (void)mcu_sensor_service_handle_link_event(event, &overwrote_latest);
     stress_mode_on_link_event(event);
 
