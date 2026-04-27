@@ -34,6 +34,18 @@ port = "COM31"
 
 The alias `s3-a` stays stable across the team. Only the local `port` changes.
 
+For a dual-MCU bring-up bench, keep both aliases in the same shared file:
+
+```toml
+[devices.s3-c]
+firmware = "s3"
+port = "COM28"
+
+[devices.stm32-c]
+firmware = "stm32"
+port = "COM18"
+```
+
 Important: new worktrees should read the shared map first through `CODEX_DEVICE_MAP_PATH`. Do not rely on a per-worktree `.codex/local/device-map.toml` unless you intentionally override the shared path for a one-off test.
 
 Point every worktree at that shared file:
@@ -100,6 +112,43 @@ Keep the shared lane table free of raw COM ports. A lane should contain:
 - `status`
 
 See `.codex/lanes.example.yaml` for a tracked example.
+
+---
+
+## STM32 Bring-up Session Runner
+
+Use the shared device map and capture both serial consoles into one session:
+
+```powershell
+python .\tools\stm32_bringup_session.py `
+  --esp-alias s3-c `
+  --stm32-alias stm32-c `
+  --feature stm32-uart2-bringup `
+  --duration-sec 120
+```
+
+What it does:
+
+- Resolves `s3-c` and `stm32-c` from `CODEX_DEVICE_MAP_PATH`
+- Opens the ESP32 log UART and the STM32 `USART1` debug UART together
+- Captures raw per-device logs plus a merged host-timestamped view
+- Parses only `MCU_OBS` and `STM32_OBS` as structured observations
+- Writes a session directory under `.codex/local/logs/<operator>/<feature>/<esp_alias>--<stm32_alias>/`
+
+Fixed outputs:
+
+- `session.json`
+- `esp32.raw.log`
+- `stm32.raw.log`
+- `merged.log`
+- `timeline.ndjson`
+
+Scope note:
+
+- This tool is for log capture only
+- It does not flash firmware
+- It does not drive `stm32_uart_hil.py --transport serial`
+- It does not sniff the board-internal `UART2@921600`; use merged `ESP32 log + STM32 USART1` output instead
 
 ---
 

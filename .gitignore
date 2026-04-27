@@ -42,6 +42,7 @@ docs/api/
 
 # Tools output
 tools/output/
+out/
 *.rgba
 *.bin.tmp
 firmware/s3/monitor-*.log

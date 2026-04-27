@@ -36,6 +36,7 @@ typedef struct {
 } control_state_text_request_t;
 
 esp_err_t control_ingress_init(void);
+esp_err_t control_ingress_submit_servo_with_seq(const control_servo_request_t *req, uint32_t *out_seq);
 esp_err_t control_ingress_submit_servo(const control_servo_request_t *req);
 esp_err_t control_ingress_submit_ai_status(const control_ai_status_request_t *req);
 esp_err_t control_ingress_submit_state_set(const control_state_set_request_t *req);

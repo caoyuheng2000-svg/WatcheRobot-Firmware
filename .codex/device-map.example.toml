@@ -12,3 +12,7 @@ port = "COM30"
 [devices.s3-c]
 firmware = "s3"
 port = "COM35"
+
+[devices.stm32-c]
+firmware = "stm32"
+port = "COM18"
