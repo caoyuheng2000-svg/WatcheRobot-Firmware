@@ -25,6 +25,7 @@ set(EXTRA_COMPONENT_DIRS
     "components/services/control_ingress"
     "components/services/mcu_led_service"
     "components/services/mcu_motion_service"
+    "components/services/mcu_power_service"
     "components/services/mcu_sensor_service"
     "components/services/ota_service"
     "components/services/sfx_service"

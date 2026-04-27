@@ -80,7 +80,7 @@ v1 固定约束：
 | --- | --- | --- |
 | `magic` | 2 | 固定 `0xA5 0x5A` |
 | `proto_ver` | 1 | 固定 `0x01` |
-| `msg_class` | 1 | 系统 / 动作 / 灯效 / 传感器 |
+| `msg_class` | 1 | 系统 / 动作 / 灯效 / 传感器 / 电源 |
 | `msg_id` | 1 | 类内消息号 |
 | `flags` | 1 | `ACK_REQ / RESP / FINAL` |
 | `seq` | 4 | 发送端本地单调递增序号 |
@@ -151,6 +151,7 @@ v1 单位冻结为：
 | `MOTION` | `0x02` |
 | `LED` | `0x03` |
 | `SENSOR` | `0x04` |
+| `POWER` | `0x05` |
 
 ### 6.2 `SYS` 类消息
 
@@ -195,6 +196,13 @@ v1 单位冻结为：
 | `IMU_EVENT` | `0x05` | STM32 -> ESP32 | 否 |
 | `SENSOR_HEALTH` | `0x06` | STM32 -> ESP32 | 否 |
 
+### 6.6 `POWER` 类消息
+
+| 名称 | `msg_id` | 方向 | ACK_REQ |
+| --- | --- | --- | --- |
+| `POWER_5V_ENABLE` | `0x01` | ESP32 -> STM32 | 是 |
+| `POWER_5V_DISABLE` | `0x02` | ESP32 -> STM32 | 是 |
+
 ## 7. 关键 payload 定义
 
 ### 7.1 `HELLO_REQ`
@@ -234,6 +242,9 @@ v1 单位冻结为：
 - `bit5 = runtime_state_snapshot`
   - `snapshot` 在本文中专指“运行时状态快照能力”
   - 不表示 camera 抓拍或图片快照
+- `bit6 = power`
+  - 表示 STM32 可通过板上电源管理通路控制 5V Boost 输出
+  - 当前实机拓扑中该 5V Boost 输出用于 STM32 侧舵机和 WS2812 LED 外设电源；ESP32 本体由 USB-C 5V 供电，不受该能力位控制
 
 `sensor_bitmap` 冻结位定义：
 
@@ -312,6 +323,7 @@ v1 中 `status_code = 0` 表示 accepted。
 - `0x04 = imu`
 - `0x05 = magnetometer`
 - `0x06 = link`
+- `0x07 = power`
 
 ### 7.6 `SERVO_MOVE`
 
@@ -473,6 +485,30 @@ v1 中 `status_code = 0` 表示 accepted。
 - `health_bitmap`
 - `error_count`
 
+### 7.18 `POWER_5V_ENABLE`
+
+字段语义：
+
+- `source_tag`
+
+语义：
+
+- STM32 通过 IP5306 KEY 控制通路发出一次短按脉冲，打开、唤醒或重新打开 5V Boost 输出。
+- 该命令控制的是“按键模拟动作”，不是持续电平型 `5V_EN`。
+- 当前硬件上该输出对应 STM32 侧舵机 / WS2812 LED 的 5V 外设电源，不表示 ESP32 本体上电。
+
+### 7.19 `POWER_5V_DISABLE`
+
+字段语义：
+
+- `source_tag`
+
+语义：
+
+- STM32 通过 IP5306 KEY 控制通路发出双击短按脉冲，关闭 5V Boost 输出。
+- 若板上接入充电输入，实际输出状态仍以 IP5306 硬件行为为准。
+- 当前 ESP32 由 USB-C 供电，因此执行该命令后 ESP32 日志串口保持在线是预期现象；验证判据应是舵机 / WS2812 LED 5V rail 或 IP5306 输出端。
+
 ## 8. 默认速率与上报策略
 
 v1 默认速率冻结为：
@@ -506,6 +542,8 @@ v1 默认速率冻结为：
 - `LED_SET_STATIC`
 - `LED_SET_EFFECT`
 - `LED_OFF`
+- `POWER_5V_ENABLE`
+- `POWER_5V_DISABLE`
 
 控制命令语义冻结为：
 

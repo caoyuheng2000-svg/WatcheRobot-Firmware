@@ -61,6 +61,10 @@ ESP32 <---- UART 921600 ----> STM32
   - 验证动作 accepted 和完成事件
 - `led_effect_ack_done`
   - 验证灯效 accepted 和完成事件
+- `power_5v_enable_disable`
+  - 验证 ESP32 可下发 `POWER_5V_ENABLE / POWER_5V_DISABLE`，STM32 可 ACK 并执行 IP5306 KEY 脉冲
+  - 判据是 STM32 侧舵机 / WS2812 LED 5V rail 或 IP5306 输出端变化
+  - ESP32 由 USB-C 5V 供电，执行 disable 后 ESP32 日志串口保持在线是预期现象
 - `touch_press_release`
   - 验证触摸事件链路
 
@@ -92,6 +96,7 @@ ESP32 <---- UART 921600 ----> STM32
 - 连续运行 `10 min` 不出现未恢复卡死
 - 错帧注入后链路能自动重同步
 - `ACK timeout` 不出现持续上升趋势
+- POWER 用例中 ESP32 不应作为被断电负载；disable 后继续输出日志不计为失败
 
 ### 5.2 背压稳定性
 

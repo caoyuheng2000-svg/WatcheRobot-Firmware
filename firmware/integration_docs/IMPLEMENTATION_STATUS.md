@@ -11,6 +11,15 @@
 
 ## 2. 已完成
 
+### 2.0 POWER 协议补充
+
+- `POWER_5V_ENABLE / POWER_5V_DISABLE` 已加入 ESP32/STM32 协处理器协议枚举与构帧/解析路径。
+- 当前硬件判据已澄清：ESP32 由 USB-C 5V 供电，POWER 通路只控制 STM32 侧舵机和 WS2812 LED 的 5V 外设电源。
+- 2026-04-27 双端串口 smoke 已确认：
+  - ESP32 当前分支固件可启动并进入 `MCU_OBS evt=ready link_state=READY`
+  - STM32 `COM56` CLI 可执行 `ip5306_on / ip5306_off / ip5306_long / ip5306_irq`
+  - `ip5306_off` 后 ESP32 `COM37` 日志继续输出符合供电拓扑预期，不作为 POWER disable 失败判据
+
 ### 2.1 文档基线
 
 以下文档已冻结并作为当前实现依据：

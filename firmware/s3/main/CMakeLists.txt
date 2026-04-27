@@ -22,6 +22,7 @@ idf_component_register(
         anim_service
         mcu_motion_service
         mcu_led_service
+        mcu_power_service
         mcu_sensor_service
         # camera_service
         control_ingress

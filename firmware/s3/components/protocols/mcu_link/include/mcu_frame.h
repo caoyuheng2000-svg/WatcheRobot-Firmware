@@ -33,6 +33,7 @@ typedef enum {
     MCU_FRAME_CLASS_MOTION = 0x02u,
     MCU_FRAME_CLASS_LED = 0x03u,
     MCU_FRAME_CLASS_SENSOR = 0x04u,
+    MCU_FRAME_CLASS_POWER = 0x05u,
 } mcu_frame_class_t;
 
 typedef enum {
@@ -75,6 +76,11 @@ typedef enum {
     MCU_SENSOR_MSG_IMU_EVENT = 0x05u,
     MCU_SENSOR_MSG_SENSOR_HEALTH = 0x06u,
 } mcu_sensor_msg_id_t;
+
+typedef enum {
+    MCU_POWER_MSG_5V_ENABLE = 0x01u,
+    MCU_POWER_MSG_5V_DISABLE = 0x02u,
+} mcu_power_msg_id_t;
 
 typedef struct {
     uint8_t magic0;
