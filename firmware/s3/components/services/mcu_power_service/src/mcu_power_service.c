@@ -46,9 +46,14 @@ esp_err_t mcu_power_set_5v_enabled(bool enabled, mcu_power_source_t source, uint
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (!mcu_link_bootstrap_is_ready()) {
-        ESP_LOGW(TAG, "MCU link not fully ready; rejecting power request");
+    if (!mcu_link_bootstrap_is_ready() && enabled) {
+        ESP_LOGW(TAG, "MCU link not fully ready; rejecting power-on request");
         return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!mcu_link_bootstrap_is_ready()) {
+        ESP_LOGW(TAG, "MCU link not fully ready; sending power-off request anyway (state=%d)",
+                 (int)mcu_link_bootstrap_get_state());
     }
 
     payload[0] = (uint8_t)source;

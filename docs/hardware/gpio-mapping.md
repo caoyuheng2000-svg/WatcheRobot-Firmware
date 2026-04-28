@@ -50,7 +50,7 @@ Communication with the Himax vision AI chip uses the SSCMA protocol over SPI/UAR
 
 | GPIO | Function | Notes |
 |------|----------|-------|
-| See sensecap-watcher SDK | Physical button | Long press = start recording, 5-click = reboot |
+| See sensecap-watcher SDK | Physical button | Short press = start/stop recording, 4-click = reboot, 6s hold = shutdown |
 
 ---
 

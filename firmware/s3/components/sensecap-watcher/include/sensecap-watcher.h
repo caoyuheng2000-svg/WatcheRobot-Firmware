@@ -275,7 +275,7 @@ esp_err_t bsp_i2c_detect(i2c_port_t i2c_num);
 
 void bsp_system_deep_sleep(uint32_t time_in_sec);
 void bsp_system_reboot(void);
-void bsp_system_shutdown(void);
+esp_err_t bsp_system_shutdown(void);
 bool bsp_system_is_charging(void);
 bool bsp_system_is_standby(void);
 bool bsp_battery_is_present(void);
@@ -289,6 +289,7 @@ esp_err_t bsp_knob_btn_init(void *param);
 uint8_t bsp_knob_btn_get_key_value(void *param);
 esp_err_t bsp_knob_btn_deinit(void *param);
 void bsp_set_btn_long_press_cb(void (*cb)(void));
+void bsp_set_btn_long_press_ms_cb(uint16_t press_time_ms, void (*cb)(void));
 void bsp_set_btn_long_release_cb(void (*cb)(void));
 
 /**

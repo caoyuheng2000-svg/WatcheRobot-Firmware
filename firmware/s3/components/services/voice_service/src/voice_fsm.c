@@ -3,6 +3,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "hal_audio.h"
@@ -38,6 +39,8 @@ static void wake_word_cleanup(void);
 
 static voice_state_t g_state = VOICE_STATE_IDLE;
 static voice_stats_t g_stats = {0};
+static bool g_button_pressed = false;
+static int64_t g_button_press_start_ms = 0;
 
 /* Track how recording was triggered (for button behavior) */
 static bool g_recording_triggered_by_wake_word = false;
@@ -46,6 +49,8 @@ static bool g_recording_triggered_by_wake_word = false;
 #define PCM_FRAME_SIZE 1920
 
 static uint8_t g_pcm_buf[PCM_FRAME_SIZE];
+
+#define BUTTON_SHORT_PRESS_MAX_MS 3000
 
 #if CONFIG_WATCHER_LOG_HEAP_DIAGNOSTICS
 #define LOG_INTERNAL_HEAP_STATE(stage) log_internal_heap_state(stage)
@@ -343,6 +348,36 @@ static int stop_recording(void) {
     return 0;
 }
 
+static int64_t voice_now_ms(void) {
+    return esp_timer_get_time() / 1000;
+}
+
+static void handle_short_press_toggle(void) {
+    if (g_state == VOICE_STATE_IDLE) {
+        if (!ws_client_is_session_ready()) {
+            ESP_LOGW(TAG, "Short press ignored: ws session not ready (connected=%d)", ws_client_is_connected());
+            show_cloud_not_ready_state();
+            return;
+        }
+
+        ESP_LOGI(TAG, "Short press - starting recording");
+        g_recording_triggered_by_wake_word = false;
+        voice_recorder_process_event(VOICE_EVENT_BUTTON_PRESS);
+        if (g_state == VOICE_STATE_RECORDING) {
+            show_listening_ui();
+        } else {
+            show_cloud_not_ready_state();
+        }
+        return;
+    }
+
+    if (g_state == VOICE_STATE_RECORDING) {
+        ESP_LOGI(TAG, "Short press - stopping recording");
+        voice_recorder_process_event(VOICE_EVENT_BUTTON_RELEASE);
+        behavior_state_set_with_text("processing", "Processing...", 0);
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Public: Process event                                              */
 /* ------------------------------------------------------------------ */
@@ -499,35 +534,28 @@ int voice_recorder_tick(void) {
 static void button_callback(bool pressed) {
     /* This is called from task context (via hal_button_poll) */
     if (pressed) {
-        if (g_state == VOICE_STATE_IDLE) {
-            if (!ws_client_is_session_ready()) {
-                ESP_LOGW(TAG, "Button press ignored: ws session not ready (connected=%d)", ws_client_is_connected());
-                show_cloud_not_ready_state();
-                return;
-            }
-            /* Button triggers recording start */
-            ESP_LOGI(TAG, "Button PRESSED - starting recording");
-            g_recording_triggered_by_wake_word = false;
-            voice_recorder_process_event(VOICE_EVENT_BUTTON_PRESS);
-            if (g_state == VOICE_STATE_RECORDING) {
-                show_listening_ui();
-            } else {
-                show_cloud_not_ready_state();
-            }
-        } else if (g_state == VOICE_STATE_RECORDING) {
-            /* Already recording (wake word mode) - short press to stop */
-            ESP_LOGI(TAG, "Button PRESSED (short) - stopping recording (wake word mode)");
-            voice_recorder_process_event(VOICE_EVENT_BUTTON_RELEASE);
-            behavior_state_set_with_text("processing", "Processing...", 0);
-        }
+        g_button_pressed = true;
+        g_button_press_start_ms = voice_now_ms();
+        ESP_LOGI(TAG, "Button press started");
+        return;
+    }
+
+    int64_t released_ms = voice_now_ms();
+    if (g_button_press_start_ms <= 0) {
+        ESP_LOGI(TAG, "Ignoring release without tracked press");
+        g_button_pressed = false;
+        return;
+    }
+
+    int64_t held_ms = g_button_press_start_ms > 0 ? released_ms - g_button_press_start_ms : 0;
+
+    g_button_pressed = false;
+    g_button_press_start_ms = 0;
+
+    if (held_ms <= BUTTON_SHORT_PRESS_MAX_MS) {
+        handle_short_press_toggle();
     } else {
-        /* Button RELEASED - only stop if triggered by button (long press mode) */
-        if (g_state == VOICE_STATE_RECORDING && !g_recording_triggered_by_wake_word) {
-            ESP_LOGI(TAG, "Button RELEASED - stopping recording");
-            voice_recorder_process_event(VOICE_EVENT_BUTTON_RELEASE);
-            behavior_state_set_with_text("processing", "Processing...", 0);
-        }
-        /* If wake word triggered, ignore release (already stopped by short press) */
+        ESP_LOGI(TAG, "Ignoring medium press (%lld ms)", (long long)held_ms);
     }
 }
 
@@ -671,6 +699,8 @@ void voice_recorder_stop(void) {
     bool had_runtime = g_task_running || g_voice_task_handle != NULL;
 
     g_task_running = false;
+    g_button_pressed = false;
+    g_button_press_start_ms = 0;
 
     if (g_voice_task_handle != NULL && !voice_wait_for_task_exit(VOICE_TASK_EXIT_WAIT_MS)) {
         ESP_LOGW(TAG, "Voice recorder task did not exit within %u ms", (unsigned)VOICE_TASK_EXIT_WAIT_MS);
