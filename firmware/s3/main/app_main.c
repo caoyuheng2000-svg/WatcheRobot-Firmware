@@ -369,10 +369,13 @@ static void configure_runtime_log_levels(void) {
 #if CONFIG_WATCHER_RUNTIME_QUIET_LOGS
     esp_log_level_set("*", ESP_LOG_WARN);
     esp_log_level_set(TAG, ESP_LOG_INFO);
-    esp_log_level_set(MCU_OBS_TAG, ESP_LOG_INFO);
+    esp_log_level_set(MCU_OBS_TAG, ESP_LOG_WARN);
     esp_log_level_set("MEM_MON", ESP_LOG_INFO);
     esp_log_level_set("BSP", ESP_LOG_INFO);
     esp_log_level_set("VOICE", ESP_LOG_INFO);
+    esp_log_level_set("HAL_AUDIO", ESP_LOG_INFO);
+    esp_log_level_set("HAL_WAKE_WORD", ESP_LOG_INFO);
+    esp_log_level_set("WS_CLIENT", ESP_LOG_INFO);
 #endif
 }
 

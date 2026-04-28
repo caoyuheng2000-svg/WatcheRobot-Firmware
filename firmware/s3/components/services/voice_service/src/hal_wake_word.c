@@ -35,9 +35,17 @@
 #define DETECTION_RUNNING_BIT (1 << 0)
 #define MAX_WAKE_WORDS 16
 #define MAX_WAKE_WORD_LEN 32
-#define DETECTION_TASK_STACK 4096
-#define DETECTION_TASK_PRIO 6
+#define DETECTION_TASK_STACK CONFIG_WAKE_WORD_TASK_STACK_SIZE
+#define DETECTION_TASK_PRIO CONFIG_WAKE_WORD_TASK_PRIORITY
 #define INPUT_BUFFER_CAPACITY 2048 /* samples */
+
+#ifdef CONFIG_WAKE_WORD_DET_MODE_95
+#define WAKE_WORD_DET_MODE DET_MODE_95
+#define WAKE_WORD_DET_MODE_NAME "DET_MODE_95"
+#else
+#define WAKE_WORD_DET_MODE DET_MODE_90
+#define WAKE_WORD_DET_MODE_NAME "DET_MODE_90"
+#endif
 
 /* ------------------------------------------------------------------ */
 /* Context Structure                                                */
@@ -251,11 +259,7 @@ wake_word_ctx_t *hal_wake_word_init(const wake_word_config_t *config) {
         return NULL;
     }
 
-    /* Configure AFE */
-    /* Single microphone, no reference channel */
-    const char *input_format = "M"; /* M = microphone, R = reference */
-
-    afe_config_t *afe_config = afe_config_init(input_format, ctx->models, AFE_TYPE_SR, AFE_MODE_HIGH_PERF);
+    afe_config_t *afe_config = (afe_config_t *)calloc(1, sizeof(afe_config_t));
     if (afe_config == NULL) {
         ESP_LOGE(TAG, "Failed to init AFE config");
         esp_srmodel_deinit(ctx->models);
@@ -263,15 +267,30 @@ wake_word_ctx_t *hal_wake_word_init(const wake_word_config_t *config) {
         free(ctx);
         return NULL;
     }
+    *afe_config = (afe_config_t)AFE_CONFIG_DEFAULT();
 
     /* Configure AFE for ESP32-S3 with PSRAM */
-    afe_config->aec_init = false;                                /* No acoustic echo cancellation */
-    afe_config->afe_perferred_core = 1;                          /* Run on core 1 */
-    afe_config->afe_perferred_priority = 3;                      /* Medium priority */
+    afe_config->aec_init = false; /* No acoustic echo cancellation */
+    afe_config->se_init = true;
+    afe_config->vad_init = false;
+    afe_config->wakenet_init = true;
+    afe_config->wakenet_model_name = (char *)wakenet_model;
+    afe_config->wakenet_mode = WAKE_WORD_DET_MODE;
+    afe_config->afe_mode = SR_MODE_HIGH_PERF;
+    afe_config->afe_perferred_core = 1;     /* Run on core 1 */
+    afe_config->afe_perferred_priority = 3; /* Medium priority */
+    afe_config->afe_ringbuf_size = 50;
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM; /* Use PSRAM */
+    afe_config->afe_linear_gain = 2.0f;
+    afe_config->pcm_config.total_ch_num = 1;
+    afe_config->pcm_config.mic_num = 1;
+    afe_config->pcm_config.ref_num = 0;
+    afe_config->pcm_config.sample_rate = 16000;
+    ESP_LOGI(TAG, "WakeNet model=%s det_mode=%s memory=MORE_PSRAM linear_gain=%.1f", wakenet_model,
+             WAKE_WORD_DET_MODE_NAME, afe_config->afe_linear_gain);
 
     /* Get AFE interface */
-    ctx->afe_iface = esp_afe_handle_from_config(afe_config);
+    ctx->afe_iface = &ESP_AFE_SR_HANDLE;
     if (ctx->afe_iface == NULL) {
         ESP_LOGE(TAG, "Failed to get AFE interface");
         free(afe_config);
