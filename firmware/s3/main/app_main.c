@@ -47,7 +47,9 @@
 #define MCU_OBS_TAG "MCU_OBS"
 
 /* Physical restart: click count to trigger reboot */
-#define RESTART_CLICK_COUNT 3
+#define RESTART_CLICK_COUNT 4
+#define BUTTON_SHUTDOWN_HOLD_MS 6000
+#define STM32_POWER_OFF_SETTLE_MS 300
 #define STARTUP_BEHAVIOR_POLL_MS 50
 #define STARTUP_BEHAVIOR_TIMEOUT_MS 10000
 #define CLOUD_DISCOVERY_TIMEOUT_MS 5000
@@ -143,6 +145,7 @@ static mcu_link_state_t s_last_mcu_obs_state = MCU_LINK_STATE_DOWN;
 static bool s_mcu_obs_stats_initialized = false;
 static mcu_link_stats_t s_last_mcu_obs_stats = {0};
 static int64_t s_last_mcu_obs_stats_log_us = 0;
+static volatile bool s_shutdown_in_progress = false;
 #if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
 static TaskHandle_t s_mcu_link_runtime_task = NULL;
 #endif
@@ -602,6 +605,37 @@ static void on_button_multi_click_restart(void) {
     esp_restart();
 }
 
+static void on_button_shutdown_hold(void) {
+    uint32_t power_seq = 0;
+    esp_err_t ret;
+
+    if (s_shutdown_in_progress) {
+        return;
+    }
+    s_shutdown_in_progress = true;
+
+    ESP_LOGW(TAG, "Button long press - shutting down");
+    behavior_state_set_with_text("error", "Shutting down...", 0);
+    voice_recorder_stop();
+
+    ret = mcu_power_set_5v_enabled(false, MCU_POWER_SOURCE_BEHAVIOR, &power_seq);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "STM32 5V power-off request failed: %s; keeping ESP32 powered", esp_err_to_name(ret));
+        s_shutdown_in_progress = false;
+        return;
+    }
+
+    ESP_LOGW(TAG, "STM32 5V power-off request queued seq=%lu; shutting down ESP32 after %u ms",
+             (unsigned long)power_seq, (unsigned)STM32_POWER_OFF_SETTLE_MS);
+    vTaskDelay(pdMS_TO_TICKS(STM32_POWER_OFF_SETTLE_MS));
+
+    ret = bsp_system_shutdown();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Shutdown GPIO request failed: %s", esp_err_to_name(ret));
+        s_shutdown_in_progress = false;
+    }
+}
+
 static void init_runtime_inputs_and_restart_path(void) {
     int input_ret;
     bool knob_ready;
@@ -616,6 +650,8 @@ static void init_runtime_inputs_and_restart_path(void) {
     }
 
     if (knob_ready) {
+        bsp_set_btn_long_press_ms_cb(BUTTON_SHUTDOWN_HOLD_MS, on_button_shutdown_hold);
+        ESP_LOGI(TAG, "Registered %d ms shutdown hold callback", BUTTON_SHUTDOWN_HOLD_MS);
         bsp_set_btn_multi_click_cb(RESTART_CLICK_COUNT, on_button_multi_click_restart);
         ESP_LOGI(TAG, "Registered %d-click restart callback", RESTART_CLICK_COUNT);
     } else {

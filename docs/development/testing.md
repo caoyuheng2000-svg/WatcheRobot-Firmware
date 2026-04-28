@@ -72,13 +72,15 @@ ctest --test-dir build -V
 
 | # | Test | Expected | Status |
 |---|------|----------|--------|
-| 2.1 | Button long press → recording | Display "Listening..." | ⬜ |
+| 2.1 | Button short press → start recording | Display "Listening..." | ⬜ |
 | 2.2 | Send Raw PCM 16kHz | Server receives audio | ⬜ |
-| 2.3 | Button release → audio_end | Server acknowledges | ⬜ |
-| 2.4 | Receive asr_result | Display recognized text | ⬜ |
-| 2.5 | Receive bot_reply | Display AI response | ⬜ |
-| 2.6 | Receive TTS audio | Play Raw PCM 24kHz | ⬜ |
-| 2.7 | tts_end received | Resume wake word | ⬜ |
+| 2.3 | Button short press while recording → audio_end | Server acknowledges | ⬜ |
+| 2.4 | Button 4-click | Device reboots | ⬜ |
+| 2.5 | Button 6s hold | STM32 5V off request sent, then ESP32 shutdown GPIO asserted | ⬜ |
+| 2.6 | Receive asr_result | Display recognized text | ⬜ |
+| 2.7 | Receive bot_reply | Display AI response | ⬜ |
+| 2.8 | Receive TTS audio | Play Raw PCM 24kHz | ⬜ |
+| 2.9 | tts_end received | Resume wake word | ⬜ |
 
 ### 4.3 Wake Word Test
 
@@ -155,7 +157,9 @@ Before each release:
 - [ ] All unit tests pass
 - [ ] Integration tests pass
 - [ ] Wake word detection works
-- [ ] Button recording works
+- [ ] Button short press start/stop recording works
+- [ ] Button 4-click reboot works
+- [ ] Button 6s hold shutdown path works
 - [ ] TTS playback works
 - [ ] Servo control works
 - [ ] Animation smooth at 30fps

@@ -280,6 +280,10 @@ static void bsp_btn_cb(void *arg, void *arg2) {
 }
 
 void bsp_set_btn_long_press_cb(void (*cb)(void)) {
+    bsp_set_btn_long_press_ms_cb(0, cb);
+}
+
+void bsp_set_btn_long_press_ms_cb(uint16_t press_time_ms, void (*cb)(void)) {
     lv_indev_t *tp = NULL;
     while (1) {
         tp = lv_indev_get_next(tp);
@@ -293,7 +297,22 @@ void bsp_set_btn_long_press_cb(void (*cb)(void)) {
         return;
     }
 
-    lvgl_port_encoder_btn_register_event_cb(tp, BUTTON_LONG_PRESS_START, bsp_btn_cb, cb);
+    if (press_time_ms == 0) {
+        lvgl_port_encoder_btn_register_event_cb(tp, BUTTON_LONG_PRESS_START, bsp_btn_cb, cb);
+        return;
+    }
+
+    button_event_config_t event_cfg = {
+        .event = BUTTON_LONG_PRESS_START,
+        .event_data.long_press.press_time = press_time_ms,
+    };
+    esp_err_t ret = lvgl_port_encoder_btn_register_event_data_cb(tp, event_cfg, bsp_btn_cb, cb);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register %u ms long-press callback: %s", (unsigned)press_time_ms,
+                 esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "Registered %u ms long-press callback", (unsigned)press_time_ms);
+    }
 }
 
 void bsp_set_btn_long_release_cb(void (*cb)(void)) {
@@ -576,8 +595,14 @@ void bsp_system_reboot(void) {
     esp_restart();
 }
 
-void bsp_system_shutdown(void) {
-    bsp_exp_io_set_level(BSP_PWR_SYSTEM, 0);
+esp_err_t bsp_system_shutdown(void) {
+    esp_err_t ret = bsp_exp_io_set_level(BSP_PWR_SYSTEM, 0);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "System shutdown request failed: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGW(TAG, "System shutdown requested: BSP_PWR_SYSTEM=0");
+    }
+    return ret;
 }
 
 bool bsp_system_is_charging(void) {
@@ -908,7 +933,7 @@ static lv_indev_t *bsp_knob_indev_init(lv_disp_t *disp) {
     };
     const static button_config_t btn_config = {
         .type = BUTTON_TYPE_CUSTOM,
-        .long_press_time = 500, /* Reduced from 2000ms to 500ms for faster voice trigger */
+        .long_press_time = 6000,
         .short_press_time = 200,
         .custom_button_config =
             {
