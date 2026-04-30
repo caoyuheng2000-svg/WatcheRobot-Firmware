@@ -47,6 +47,23 @@ menu "Watcher Voice Service"
         default 6
         depends on ENABLE_WAKE_WORD
 
+    config VOICE_AUDIO_STATS_LOG_INTERVAL_FRAMES
+        int "Recording audio stats log interval"
+        default 60
+        range 0 1000
+        help
+            Emit one recording audio stats log every N encoded frames. Set to
+            0 to disable periodic recording audio stats logs.
+
+    config WAKE_IDLE_STATS_LOG_INTERVAL_FRAMES
+        int "Idle wake audio stats log interval"
+        default 120
+        range 0 2000
+        depends on ENABLE_WAKE_WORD
+        help
+            Emit one idle wake-word audio stats log every N microphone frames.
+            Set to 0 to disable periodic idle wake audio stats logs.
+
     choice WAKE_WORD_DET_MODE
         prompt "WakeNet detection sensitivity"
         default WAKE_WORD_DET_MODE_95

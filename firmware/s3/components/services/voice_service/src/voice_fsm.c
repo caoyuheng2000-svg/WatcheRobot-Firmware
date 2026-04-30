@@ -55,6 +55,16 @@ static bool g_recording_triggered_by_wake_word = false;
 static uint8_t g_pcm_buf[PCM_FRAME_SIZE];
 
 #define VOICE_EVENT_QUEUE_LEN 4
+#ifdef CONFIG_VOICE_AUDIO_STATS_LOG_INTERVAL_FRAMES
+#define VOICE_AUDIO_STATS_LOG_INTERVAL_FRAMES CONFIG_VOICE_AUDIO_STATS_LOG_INTERVAL_FRAMES
+#else
+#define VOICE_AUDIO_STATS_LOG_INTERVAL_FRAMES 60
+#endif
+#ifdef CONFIG_WAKE_IDLE_STATS_LOG_INTERVAL_FRAMES
+#define WAKE_IDLE_STATS_LOG_INTERVAL_FRAMES CONFIG_WAKE_IDLE_STATS_LOG_INTERVAL_FRAMES
+#else
+#define WAKE_IDLE_STATS_LOG_INTERVAL_FRAMES 120
+#endif
 
 #if CONFIG_WATCHER_LOG_HEAP_DIAGNOSTICS
 #define LOG_INTERNAL_HEAP_STATE(stage) log_internal_heap_state(stage)
@@ -461,7 +471,8 @@ int voice_recorder_tick(void) {
         taskYIELD();
 
         wake_idle_frame_count++;
-        if ((wake_idle_frame_count % 50U) == 0U) {
+        if (WAKE_IDLE_STATS_LOG_INTERVAL_FRAMES > 0 &&
+            (wake_idle_frame_count % WAKE_IDLE_STATS_LOG_INTERVAL_FRAMES) == 0U) {
             int64_t idle_sum_sq = 0;
             int16_t idle_peak = 0;
             int idle_zero_count = 0;
@@ -479,9 +490,9 @@ int voice_recorder_tick(void) {
                 }
             }
             int idle_rms = num_samples > 0 ? (int)sqrt((double)(idle_sum_sq / (int64_t)num_samples)) : 0;
-            ESP_LOGI(TAG, "Wake idle audio: frame=%lu rms=%d peak=%d zeros=%d/%u feed_samples=%u",
-                     (unsigned long)wake_idle_frame_count, idle_rms, idle_peak, idle_zero_count,
-                     (unsigned)num_samples, (unsigned)hal_wake_word_get_feed_size(g_wake_word_ctx));
+            ESP_LOGI(TAG, "wake_idle frame=%lu rms=%d peak=%d zeros=%d/%u feed=%u",
+                     (unsigned long)wake_idle_frame_count, idle_rms, idle_peak, idle_zero_count, (unsigned)num_samples,
+                     (unsigned)hal_wake_word_get_feed_size(g_wake_word_ctx));
         }
     }
 
@@ -529,24 +540,21 @@ int voice_recorder_tick(void) {
     int rms = (int)(sum_sq / sample_count);
     rms = (int)sqrt((double)rms);
 
-    /* Log every 10 frames */
-    if (g_stats.encode_count % 10 == 0) {
+    if (VOICE_AUDIO_STATS_LOG_INTERVAL_FRAMES > 0 &&
+        g_stats.encode_count % VOICE_AUDIO_STATS_LOG_INTERVAL_FRAMES == 0) {
         ws_client_audio_queue_stats_t queue_stats = {0};
         ws_client_media_send_stats_t send_stats = {0};
 
         ws_client_get_audio_queue_stats(&queue_stats);
         ws_client_get_media_send_stats(&send_stats);
         ESP_LOGI(TAG,
-                 "Audio: frame#%d rms=%d peak=%d zeros=%d/%d queue{pending=%u high=%u queued=%lu sent=%lu dropped=%lu "
-                 "delay=%lu end=%d first=%d} "
-                 "send{total=%lu lock=%lu send=%lu payload=%u packet=%u}",
-                 g_stats.encode_count + 1, rms, peak, zero_count, sample_count,
-                 (unsigned int)queue_stats.pending_frames, (unsigned int)queue_stats.high_watermark,
-                 (unsigned long)queue_stats.queued_frames, (unsigned long)queue_stats.sent_frames,
-                 (unsigned long)queue_stats.dropped_frames, (unsigned long)queue_stats.last_queue_delay_us,
-                 queue_stats.end_pending, queue_stats.first_frame_pending, (unsigned long)send_stats.total_us,
-                 (unsigned long)send_stats.lock_wait_us, (unsigned long)send_stats.send_us,
-                 (unsigned int)send_stats.payload_len, (unsigned int)send_stats.packet_len);
+                 "audio frame=%d rms=%d peak=%d zeros=%d/%d q{p=%u hi=%u in=%lu out=%lu drop=%lu delay_us=%lu} "
+                 "send_us=%lu/%lu packet=%u",
+                 g_stats.encode_count + 1, rms, peak, zero_count, sample_count, (unsigned int)queue_stats.pending_frames,
+                 (unsigned int)queue_stats.high_watermark, (unsigned long)queue_stats.queued_frames,
+                 (unsigned long)queue_stats.sent_frames, (unsigned long)queue_stats.dropped_frames,
+                 (unsigned long)queue_stats.last_queue_delay_us, (unsigned long)send_stats.send_us,
+                 (unsigned long)send_stats.total_us, (unsigned int)send_stats.packet_len);
     }
 
 #ifdef CONFIG_ENABLE_WAKE_WORD

@@ -23,6 +23,7 @@
 #define MEM_MONITOR_WARN_DMA_LARGEST_BYTES ((size_t)CONFIG_WATCHER_MEM_MONITOR_WARN_DMA_LARGEST_KB * 1024U)
 #define MEM_MONITOR_CRITICAL_DMA_LARGEST_BYTES ((size_t)CONFIG_WATCHER_MEM_MONITOR_CRITICAL_DMA_LARGEST_KB * 1024U)
 #define MEM_MONITOR_TASK_PRIORITY 1
+#define MEM_MONITOR_INTEGRITY_MIN_STACK_HWM 1024U
 #ifdef CONFIG_WATCHER_MEM_MONITOR_TASK_STACK_SIZE
 #define MEM_MONITOR_TASK_STACK_SIZE CONFIG_WATCHER_MEM_MONITOR_TASK_STACK_SIZE
 #else
@@ -54,7 +55,9 @@ static StackType_t *s_monitor_task_stack = NULL;
 static TaskHandle_t s_monitor_task = NULL;
 static mem_monitor_level_t s_last_level = MEM_MONITOR_LEVEL_OK;
 static int64_t s_last_alert_log_us = 0;
+#if CONFIG_WATCHER_MEM_MONITOR_CHECK_INTEGRITY_ON_CRITICAL
 static int64_t s_last_integrity_check_us = 0;
+#endif
 
 static bool mem_monitor_lock_take(void) {
     if (s_monitor_lock == NULL) {
@@ -172,45 +175,25 @@ static void mem_monitor_log_snapshot(const char *stage, const mem_monitor_snapsh
                                      mem_monitor_level_t level, const char *reason, bool recovery) {
     const char *safe_stage = (stage != NULL && stage[0] != '\0') ? stage : "periodic";
     const char *safe_reason = (reason != NULL && reason[0] != '\0') ? reason : "none";
+    UBaseType_t stack_hwm = uxTaskGetStackHighWaterMark(NULL);
 
     if (snapshot == NULL) {
         ESP_LOGW(TAG, "[%s] heap snapshot unavailable", safe_stage);
         return;
     }
 
-    if (recovery) {
-        ESP_LOGI(
-            TAG,
-            "[%s] recovered: int=%u/%uKB(min=%uKB) dma=%u/%uKB(min=%uKB) 8bit=%u/%uKB(min=%uKB)"
-#if CONFIG_SPIRAM
-            " psram=%u/%uKB(min=%uKB)"
-#endif
-            ,
-            safe_stage, mem_monitor_bytes_to_kb(snapshot->internal.total_free_bytes),
-            mem_monitor_bytes_to_kb(snapshot->internal.largest_free_block),
-            mem_monitor_bytes_to_kb(snapshot->min_internal), mem_monitor_bytes_to_kb(snapshot->dma.total_free_bytes),
-            mem_monitor_bytes_to_kb(snapshot->dma.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_dma),
-            mem_monitor_bytes_to_kb(snapshot->heap_8bit.total_free_bytes),
-            mem_monitor_bytes_to_kb(snapshot->heap_8bit.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_8bit)
-#if CONFIG_SPIRAM
-                                                                                 ,
-            mem_monitor_bytes_to_kb(snapshot->spiram.total_free_bytes),
-            mem_monitor_bytes_to_kb(snapshot->spiram.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_spiram)
-#endif
-        );
-        return;
-    }
+    const char *status = recovery ? "recovered" : mem_monitor_level_to_string(level);
 
-    if (level == MEM_MONITOR_LEVEL_CRITICAL) {
+    if (level == MEM_MONITOR_LEVEL_CRITICAL && !recovery) {
         ESP_LOGE(
             TAG,
-            "[%s] pressure=%s(%s): int=%u/%uKB(min=%uKB) dma=%u/%uKB(min=%uKB) 8bit=%u/%uKB(min=%uKB)"
+            "[%s] %s(%s) int{free=%uKB largest=%uKB min=%uKB} dma{free=%uKB largest=%uKB min=%uKB} "
+            "8bit{free=%uKB largest=%uKB min=%uKB}"
 #if CONFIG_SPIRAM
-            " psram=%u/%uKB(min=%uKB)"
+            " psram{free=%uKB largest=%uKB min=%uKB}"
 #endif
-            ,
-            safe_stage, mem_monitor_level_to_string(level), safe_reason,
-            mem_monitor_bytes_to_kb(snapshot->internal.total_free_bytes),
+            " stack_hwm=%u",
+            safe_stage, status, safe_reason, mem_monitor_bytes_to_kb(snapshot->internal.total_free_bytes),
             mem_monitor_bytes_to_kb(snapshot->internal.largest_free_block),
             mem_monitor_bytes_to_kb(snapshot->min_internal), mem_monitor_bytes_to_kb(snapshot->dma.total_free_bytes),
             mem_monitor_bytes_to_kb(snapshot->dma.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_dma),
@@ -221,20 +204,21 @@ static void mem_monitor_log_snapshot(const char *stage, const mem_monitor_snapsh
             mem_monitor_bytes_to_kb(snapshot->spiram.total_free_bytes),
             mem_monitor_bytes_to_kb(snapshot->spiram.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_spiram)
 #endif
-        );
+            ,
+            (unsigned)stack_hwm);
         return;
     }
 
-    if (level == MEM_MONITOR_LEVEL_WARN) {
+    if (level == MEM_MONITOR_LEVEL_WARN && !recovery) {
         ESP_LOGW(
             TAG,
-            "[%s] pressure=%s(%s): int=%u/%uKB(min=%uKB) dma=%u/%uKB(min=%uKB) 8bit=%u/%uKB(min=%uKB)"
+            "[%s] %s(%s) int{free=%uKB largest=%uKB min=%uKB} dma{free=%uKB largest=%uKB min=%uKB} "
+            "8bit{free=%uKB largest=%uKB min=%uKB}"
 #if CONFIG_SPIRAM
-            " psram=%u/%uKB(min=%uKB)"
+            " psram{free=%uKB largest=%uKB min=%uKB}"
 #endif
-            ,
-            safe_stage, mem_monitor_level_to_string(level), safe_reason,
-            mem_monitor_bytes_to_kb(snapshot->internal.total_free_bytes),
+            " stack_hwm=%u",
+            safe_stage, status, safe_reason, mem_monitor_bytes_to_kb(snapshot->internal.total_free_bytes),
             mem_monitor_bytes_to_kb(snapshot->internal.largest_free_block),
             mem_monitor_bytes_to_kb(snapshot->min_internal), mem_monitor_bytes_to_kb(snapshot->dma.total_free_bytes),
             mem_monitor_bytes_to_kb(snapshot->dma.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_dma),
@@ -245,18 +229,20 @@ static void mem_monitor_log_snapshot(const char *stage, const mem_monitor_snapsh
             mem_monitor_bytes_to_kb(snapshot->spiram.total_free_bytes),
             mem_monitor_bytes_to_kb(snapshot->spiram.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_spiram)
 #endif
-        );
+            ,
+            (unsigned)stack_hwm);
         return;
     }
 
     ESP_LOGI(
         TAG,
-        "[%s] pressure=%s: int=%u/%uKB(min=%uKB) dma=%u/%uKB(min=%uKB) 8bit=%u/%uKB(min=%uKB)"
+        "[%s] %s int{free=%uKB largest=%uKB min=%uKB} dma{free=%uKB largest=%uKB min=%uKB} "
+        "8bit{free=%uKB largest=%uKB min=%uKB}"
 #if CONFIG_SPIRAM
-        " psram=%u/%uKB(min=%uKB)"
+        " psram{free=%uKB largest=%uKB min=%uKB}"
 #endif
-        ,
-        safe_stage, mem_monitor_level_to_string(level), mem_monitor_bytes_to_kb(snapshot->internal.total_free_bytes),
+        " stack_hwm=%u",
+        safe_stage, status, mem_monitor_bytes_to_kb(snapshot->internal.total_free_bytes),
         mem_monitor_bytes_to_kb(snapshot->internal.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_internal),
         mem_monitor_bytes_to_kb(snapshot->dma.total_free_bytes),
         mem_monitor_bytes_to_kb(snapshot->dma.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_dma),
@@ -267,18 +253,28 @@ static void mem_monitor_log_snapshot(const char *stage, const mem_monitor_snapsh
         mem_monitor_bytes_to_kb(snapshot->spiram.total_free_bytes),
         mem_monitor_bytes_to_kb(snapshot->spiram.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_spiram)
 #endif
-    );
+        ,
+        (unsigned)stack_hwm);
 }
+
+#if CONFIG_WATCHER_MEM_MONITOR_CHECK_INTEGRITY_ON_CRITICAL
+static bool mem_monitor_has_integrity_stack_headroom(void) {
+    UBaseType_t stack_hwm = uxTaskGetStackHighWaterMark(NULL);
+    return stack_hwm >= MEM_MONITOR_INTEGRITY_MIN_STACK_HWM;
+}
+#endif
 
 static bool mem_monitor_should_repeat_alert(int64_t now_us) {
     int64_t repeat_us = (int64_t)CONFIG_WATCHER_MEM_MONITOR_ALERT_REPEAT_MS * 1000LL;
     return s_last_alert_log_us == 0 || (now_us - s_last_alert_log_us) >= repeat_us;
 }
 
+#if CONFIG_WATCHER_MEM_MONITOR_CHECK_INTEGRITY_ON_CRITICAL
 static bool mem_monitor_should_run_integrity_check(int64_t now_us) {
     int64_t repeat_us = (int64_t)CONFIG_WATCHER_MEM_MONITOR_ALERT_REPEAT_MS * 1000LL;
     return s_last_integrity_check_us == 0 || (now_us - s_last_integrity_check_us) >= repeat_us;
 }
+#endif
 
 static void mem_monitor_sample(const char *stage, bool force_log) {
     const char *reason = NULL;
@@ -314,6 +310,14 @@ static void mem_monitor_sample(const char *stage, bool force_log) {
 
 #if CONFIG_WATCHER_MEM_MONITOR_CHECK_INTEGRITY_ON_CRITICAL
     if (level == MEM_MONITOR_LEVEL_CRITICAL && mem_monitor_should_run_integrity_check(snapshot.captured_at_us)) {
+        if (!mem_monitor_has_integrity_stack_headroom()) {
+            ESP_LOGW(TAG, "[%s] heap integrity skipped: low monitor stack hwm=%u", stage ? stage : "periodic",
+                     (unsigned)uxTaskGetStackHighWaterMark(NULL));
+            s_last_integrity_check_us = snapshot.captured_at_us;
+            s_last_level = level;
+            mem_monitor_lock_give();
+            return;
+        }
         bool ok = heap_caps_check_integrity_all(false);
         s_last_integrity_check_us = snapshot.captured_at_us;
         if (ok) {
