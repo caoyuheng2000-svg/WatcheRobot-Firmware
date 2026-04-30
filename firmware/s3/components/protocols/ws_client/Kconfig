@@ -36,4 +36,14 @@ menu "Watcher WebSocket Client"
             WebSocket message. Larger payloads are rejected before they can
             flood the playback queue.
 
+    config WATCHER_WS_TTS_ENQUEUE_TIMEOUT_MS
+        int "TTS enqueue backpressure timeout (ms)"
+        default 1500
+        range 100 5000
+        help
+            Maximum time a websocket receive callback waits for a free TTS
+            playback slot before dropping the current inbound TTS chunk. The
+            wait applies TCP backpressure when server-side TTS delivery is
+            faster than local I2S playback.
+
 endmenu

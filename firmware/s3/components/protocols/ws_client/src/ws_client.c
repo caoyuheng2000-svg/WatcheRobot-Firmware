@@ -78,8 +78,12 @@ void mem_monitor_snapshot(const char *stage);
 #define WS_TTS_WORKER_STACK 6144
 #define WS_TTS_WORKER_PRIO 7
 #define WS_TTS_WORKER_WAIT_MS 20
-#define WS_TTS_QUEUE_SLOT_WAIT_MS 40
 #define WS_TTS_START_BUFFER_FRAMES 2U
+#ifdef CONFIG_WATCHER_WS_TTS_ENQUEUE_TIMEOUT_MS
+#define WS_TTS_ENQUEUE_TIMEOUT_MS CONFIG_WATCHER_WS_TTS_ENQUEUE_TIMEOUT_MS
+#else
+#define WS_TTS_ENQUEUE_TIMEOUT_MS 1500
+#endif
 #define WS_HELLO_UI_MIN_INTERNAL_FREE_BYTES (24U * 1024U)
 #define WS_HELLO_UI_MIN_INTERNAL_LARGEST_BYTES (12U * 1024U)
 
@@ -137,8 +141,16 @@ static SemaphoreHandle_t s_tts_queue_lock = NULL;
 static TaskHandle_t s_tts_worker_task = NULL;
 static volatile bool s_tts_worker_running = false;
 static bool s_tts_end_pending = false;
+static bool s_tts_session_stats_active = false;
+static uint64_t s_tts_inbound_bytes = 0;
+static uint64_t s_tts_enqueue_wait_total_ms = 0;
+static uint32_t s_tts_enqueued_frames = 0;
+static uint32_t s_tts_played_frames = 0;
 static uint32_t s_tts_dropped_frames = 0;
+static uint32_t s_tts_drop_timeout_frames = 0;
 static uint32_t s_tts_high_watermark = 0;
+static uint32_t s_tts_enqueue_wait_events = 0;
+static uint32_t s_tts_enqueue_wait_max_ms = 0;
 
 typedef struct {
     char *buffer;
@@ -183,6 +195,9 @@ static bool ws_client_has_hello_ui_headroom(void);
 static esp_err_t ws_tts_runtime_init(void);
 static void ws_tts_queue_reset_locked(void);
 static void ws_tts_worker_task(void *arg);
+static bool ws_tts_take_free_slot(uint8_t *slot_idx, uint32_t *waited_ms);
+static void ws_tts_record_enqueue_wait_locked(uint32_t waited_ms);
+static void ws_tts_log_session_stats(const char *reason);
 static void ws_finish_tts_playback(void);
 static bool ws_prepare_tts_playback(bool recovering_existing_stream);
 
@@ -235,8 +250,109 @@ static void ws_tts_queue_reset_locked(void) {
     }
 
     s_tts_end_pending = false;
+    s_tts_session_stats_active = false;
+    s_tts_inbound_bytes = 0;
+    s_tts_enqueue_wait_total_ms = 0;
+    s_tts_enqueued_frames = 0;
+    s_tts_played_frames = 0;
     s_tts_dropped_frames = 0;
+    s_tts_drop_timeout_frames = 0;
     s_tts_high_watermark = 0;
+    s_tts_enqueue_wait_events = 0;
+    s_tts_enqueue_wait_max_ms = 0;
+}
+
+static void ws_tts_record_enqueue_wait_locked(uint32_t waited_ms) {
+    if (waited_ms == 0U) {
+        return;
+    }
+
+    s_tts_enqueue_wait_events++;
+    s_tts_enqueue_wait_total_ms += waited_ms;
+    if (waited_ms > s_tts_enqueue_wait_max_ms) {
+        s_tts_enqueue_wait_max_ms = waited_ms;
+    }
+}
+
+static bool ws_tts_take_free_slot(uint8_t *slot_idx, uint32_t *waited_ms) {
+    TickType_t start_ticks;
+    TickType_t timeout_ticks;
+    TickType_t poll_ticks;
+
+    if (slot_idx == NULL || waited_ms == NULL || s_tts_queue_lock == NULL || s_tts_free_slots == NULL) {
+        return false;
+    }
+
+    start_ticks = xTaskGetTickCount();
+    timeout_ticks = pdMS_TO_TICKS(WS_TTS_ENQUEUE_TIMEOUT_MS);
+    poll_ticks = pdMS_TO_TICKS(WS_TTS_WORKER_WAIT_MS);
+    if (poll_ticks == 0) {
+        poll_ticks = 1;
+    }
+
+    while (true) {
+        TickType_t elapsed_ticks;
+
+        if (xSemaphoreTake(s_tts_queue_lock, poll_ticks) == pdTRUE) {
+            if (xQueueReceive(s_tts_free_slots, slot_idx, 0) == pdTRUE) {
+                elapsed_ticks = xTaskGetTickCount() - start_ticks;
+                *waited_ms = (uint32_t)(elapsed_ticks * portTICK_PERIOD_MS);
+                /* Keep the queue lock held so reset/abort cannot reclaim this reserved slot before enqueue. */
+                return true;
+            }
+            xSemaphoreGive(s_tts_queue_lock);
+        }
+
+        elapsed_ticks = xTaskGetTickCount() - start_ticks;
+        if (elapsed_ticks >= timeout_ticks) {
+            *waited_ms = (uint32_t)(elapsed_ticks * portTICK_PERIOD_MS);
+            return false;
+        }
+
+        vTaskDelay(poll_ticks);
+    }
+}
+
+static void ws_tts_log_session_stats(const char *reason) {
+    uint64_t inbound_bytes;
+    uint64_t wait_total_ms;
+    uint32_t enqueued_frames;
+    uint32_t played_frames;
+    uint32_t dropped_frames;
+    uint32_t drop_timeout_frames;
+    uint32_t high_watermark;
+    uint32_t wait_events;
+    uint32_t wait_max_ms;
+
+    if (s_tts_queue_lock == NULL || xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(50)) != pdTRUE) {
+        return;
+    }
+
+    if (!s_tts_session_stats_active) {
+        xSemaphoreGive(s_tts_queue_lock);
+        return;
+    }
+
+    inbound_bytes = s_tts_inbound_bytes;
+    wait_total_ms = s_tts_enqueue_wait_total_ms;
+    enqueued_frames = s_tts_enqueued_frames;
+    played_frames = s_tts_played_frames;
+    dropped_frames = s_tts_dropped_frames;
+    drop_timeout_frames = s_tts_drop_timeout_frames;
+    high_watermark = s_tts_high_watermark;
+    wait_events = s_tts_enqueue_wait_events;
+    wait_max_ms = s_tts_enqueue_wait_max_ms;
+    s_tts_session_stats_active = false;
+    xSemaphoreGive(s_tts_queue_lock);
+
+    ESP_LOGI(TAG,
+             "TTS session %s: inbound_bytes=%llu enqueued_frames=%lu played_frames=%lu dropped_frames=%lu "
+             "drop_timeout=%lu high=%lu enqueue_wait_events=%lu enqueue_wait_total_ms=%llu "
+             "enqueue_wait_max_ms=%lu",
+             reason, (unsigned long long)inbound_bytes, (unsigned long)enqueued_frames,
+             (unsigned long)played_frames, (unsigned long)dropped_frames, (unsigned long)drop_timeout_frames,
+             (unsigned long)high_watermark, (unsigned long)wait_events, (unsigned long long)wait_total_ms,
+             (unsigned long)wait_max_ms);
 }
 
 static esp_err_t ws_tts_runtime_init(void) {
@@ -661,6 +777,7 @@ static void ws_tts_worker_task(void *arg) {
 
             if (s_tts_queue_lock != NULL &&
                 xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(WS_TTS_WORKER_WAIT_MS)) == pdTRUE) {
+                s_tts_played_frames++;
                 if (s_tts_free_slots != NULL) {
                     (void)xQueueSendToBack(s_tts_free_slots, &slot_idx, 0);
                 }
@@ -799,6 +916,8 @@ static bool ws_prepare_tts_playback(bool recovering_existing_stream) {
 static void ws_abort_tts_playback(void) {
     s_waiting_for_response = false;
 
+    ws_tts_log_session_stats("aborted");
+
     if (s_tts_queue_lock != NULL && xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
         ws_tts_queue_reset_locked();
         xSemaphoreGive(s_tts_queue_lock);
@@ -819,6 +938,8 @@ static void ws_abort_tts_playback(void) {
 
 static void ws_finish_tts_playback(void) {
     s_waiting_for_response = false;
+
+    ws_tts_log_session_stats("complete");
 
     if (s_tts_playing) {
         ESP_LOGI(TAG, "TTS playback complete");
@@ -1979,43 +2100,66 @@ void ws_handle_tts_binary(const uint8_t *data, int len) {
                  (unsigned long)s_tts_high_watermark, (unsigned long)s_tts_dropped_frames);
     }
 
+    if (s_tts_queue_lock == NULL || xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(50)) != pdTRUE) {
+        return;
+    }
+    if (!s_tts_session_stats_active) {
+        s_tts_session_stats_active = true;
+        s_tts_inbound_bytes = 0;
+        s_tts_enqueue_wait_total_ms = 0;
+        s_tts_enqueued_frames = 0;
+        s_tts_played_frames = 0;
+        s_tts_dropped_frames = 0;
+        s_tts_drop_timeout_frames = 0;
+        s_tts_high_watermark = 0;
+        s_tts_enqueue_wait_events = 0;
+        s_tts_enqueue_wait_max_ms = 0;
+    }
+    s_tts_inbound_bytes += (uint64_t)len;
+    xSemaphoreGive(s_tts_queue_lock);
+
     while (offset < len) {
         uint8_t slot_idx = 0;
         int chunk_len = len - offset;
-        bool reclaimed_oldest = false;
+        uint32_t waited_ms = 0;
 
         if (chunk_len > WS_TTS_FRAME_BYTES) {
             chunk_len = WS_TTS_FRAME_BYTES;
         }
 
-        if (s_tts_queue_lock == NULL || xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(50)) != pdTRUE) {
-            return;
-        }
+        if (!ws_tts_take_free_slot(&slot_idx, &waited_ms)) {
+            uint32_t pending = 0;
+            uint32_t high = 0;
+            uint32_t dropped = 0;
+            uint32_t drop_timeout = 0;
+            uint64_t inbound_bytes = 0;
+            uint32_t played_frames = 0;
 
-        if (uxQueueMessagesWaiting(s_tts_free_slots) == 0U) {
-            xSemaphoreGive(s_tts_queue_lock);
-            vTaskDelay(pdMS_TO_TICKS(WS_TTS_QUEUE_SLOT_WAIT_MS));
-            if (s_tts_queue_lock == NULL || xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(50)) != pdTRUE) {
-                return;
-            }
-        }
-
-        if (uxQueueMessagesWaiting(s_tts_free_slots) == 0U) {
-            if (uxQueueMessagesWaiting(s_tts_pending_slots) > 0U &&
-                xQueueReceive(s_tts_pending_slots, &slot_idx, 0) == pdTRUE) {
-                reclaimed_oldest = true;
+            if (s_tts_queue_lock != NULL && xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
+                ws_tts_record_enqueue_wait_locked(waited_ms);
                 s_tts_dropped_frames++;
-            } else {
-                s_tts_dropped_frames++;
+                s_tts_drop_timeout_frames++;
+                if (s_tts_pending_slots != NULL) {
+                    pending = (uint32_t)uxQueueMessagesWaiting(s_tts_pending_slots);
+                }
+                high = s_tts_high_watermark;
+                dropped = s_tts_dropped_frames;
+                drop_timeout = s_tts_drop_timeout_frames;
+                inbound_bytes = s_tts_inbound_bytes;
+                played_frames = s_tts_played_frames;
                 xSemaphoreGive(s_tts_queue_lock);
-                return;
             }
-        } else if (xQueueReceive(s_tts_free_slots, &slot_idx, 0) != pdTRUE) {
-            s_tts_dropped_frames++;
-            xSemaphoreGive(s_tts_queue_lock);
+
+            ESP_LOGE(TAG,
+                     "tts enqueue timeout: waited_ms=%lu pending=%lu high=%lu dropped=%lu drop_timeout=%lu "
+                     "inbound_bytes=%llu played_frames=%lu",
+                     (unsigned long)waited_ms, (unsigned long)pending, (unsigned long)high,
+                     (unsigned long)dropped, (unsigned long)drop_timeout, (unsigned long long)inbound_bytes,
+                     (unsigned long)played_frames);
             return;
         }
 
+        ws_tts_record_enqueue_wait_locked(waited_ms);
         memcpy(s_tts_frame_pool[slot_idx].data, data + offset, (size_t)chunk_len);
         s_tts_frame_pool[slot_idx].len = (uint16_t)chunk_len;
         s_tts_frame_pool[slot_idx].enqueued_us = (uint64_t)esp_timer_get_time();
@@ -2027,6 +2171,7 @@ void ws_handle_tts_binary(const uint8_t *data, int len) {
             return;
         }
 
+        s_tts_enqueued_frames++;
         {
             uint32_t pending = (uint32_t)uxQueueMessagesWaiting(s_tts_pending_slots);
             if (pending > s_tts_high_watermark) {
@@ -2036,9 +2181,9 @@ void ws_handle_tts_binary(const uint8_t *data, int len) {
 
         xSemaphoreGive(s_tts_queue_lock);
 
-        if (reclaimed_oldest && (s_tts_dropped_frames % 10U) == 1U) {
-            ESP_LOGW(TAG, "tts playback queue pressure: dropped=%lu high=%lu", (unsigned long)s_tts_dropped_frames,
-                     (unsigned long)s_tts_high_watermark);
+        if (waited_ms >= WS_TTS_WORKER_WAIT_MS) {
+            ESP_LOGD(TAG, "tts enqueue backpressure: waited_ms=%lu timeout_ms=%lu",
+                     (unsigned long)waited_ms, (unsigned long)WS_TTS_ENQUEUE_TIMEOUT_MS);
         }
 
         offset += chunk_len;
