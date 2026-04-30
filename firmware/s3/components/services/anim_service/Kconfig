@@ -10,11 +10,12 @@ menu "Watcher Animation Service"
 
     config WATCHER_ANIM_RING_FRAMES
         int "Animation ring buffer frames"
-        default 3
+        default 2
         range 2 6
         help
             Number of decoded RGB565 frames kept in RAM for the active animation.
-            Three frames is the default streaming baseline.
+            Two frames keeps one displayable frame and one preload frame while
+            saving roughly 83KB of PSRAM per active playback.
 
     config WATCHER_ANIM_MAX_FRAMES_PER_TYPE
         int "Maximum frames per animation type"

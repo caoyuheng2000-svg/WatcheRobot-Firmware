@@ -11,6 +11,7 @@
 #include "driver/gpio.h"
 
 #include "cJSON.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/list.h"
 #include "freertos/queue.h"
@@ -44,6 +45,20 @@ static inline void *__malloc(size_t sz) {
     return heap_caps_calloc(1, sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 #else
     return malloc(sz);
+#endif
+}
+
+static void *sscma_client_alloc_large_buffer(size_t sz, bool zeroed) {
+#if CONFIG_SPIRAM
+    void *buffer = zeroed ? heap_caps_calloc(1, sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+                          : heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (buffer != NULL) {
+        return buffer;
+    }
+
+    return zeroed ? heap_caps_calloc(1, sz, MALLOC_CAP_8BIT) : heap_caps_malloc(sz, MALLOC_CAP_8BIT);
+#else
+    return zeroed ? calloc(1, sz) : malloc(sz);
 #endif
 }
 
@@ -357,11 +372,12 @@ esp_err_t sscma_client_new(const sscma_client_io_handle_t io, const sscma_client
     esp_log_level_set(TAG, ESP_LOG_DEBUG);
 #endif
     esp_err_t ret = ESP_OK;
+#if !CONFIG_SSCMA_PROCESS_TASK_STACK_ALLOC_EXTERNAL || !CONFIG_SSCMA_MONITOR_TASK_STACK_ALLOC_EXTERNAL
     BaseType_t res;
+#endif
     sscma_client_handle_t client = NULL;
     ESP_GOTO_ON_FALSE(io && config && ret_client, ESP_ERR_INVALID_ARG, err, TAG, "invalid argument");
-    client = (sscma_client_handle_t)malloc(sizeof(struct sscma_client_t));
-    memset(client, 0, sizeof(struct sscma_client_t));
+    client = (sscma_client_handle_t)calloc(1, sizeof(struct sscma_client_t));
     ESP_GOTO_ON_FALSE(client, ESP_ERR_NO_MEM, err, TAG, "no mem for sscma client");
     client->io = io;
     client->inited = false;
@@ -382,12 +398,12 @@ esp_err_t sscma_client_new(const sscma_client_io_handle_t io, const sscma_client
         }
     }
 
-    client->rx_buffer.data = (char *)calloc(1, (size_t)config->rx_buffer_size + 1U);
+    client->rx_buffer.data = (char *)sscma_client_alloc_large_buffer((size_t)config->rx_buffer_size + 1U, true);
     ESP_GOTO_ON_FALSE(client->rx_buffer.data, ESP_ERR_NO_MEM, err, TAG, "no mem for rx buffer");
     client->rx_buffer.pos = 0;
     client->rx_buffer.len = config->rx_buffer_size;
 
-    client->tx_buffer.data = (char *)malloc(config->tx_buffer_size);
+    client->tx_buffer.data = (char *)sscma_client_alloc_large_buffer((size_t)config->tx_buffer_size, false);
     ESP_GOTO_ON_FALSE(client->tx_buffer.data, ESP_ERR_NO_MEM, err, TAG, "no mem for tx buffer");
     client->tx_buffer.pos = 0;
     client->tx_buffer.len = config->tx_buffer_size;

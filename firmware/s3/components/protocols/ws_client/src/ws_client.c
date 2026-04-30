@@ -20,6 +20,7 @@
 #include "freertos/task.h"
 #include "hal_audio.h"
 #include "ota_service.h"
+#include "sdkconfig.h"
 #include "sfx_service.h"
 #include "voice_service.h"
 #include "ws_router.h"
@@ -47,13 +48,21 @@ void mem_monitor_snapshot(const char *stage);
 #define WS_BINARY_MAGIC "WSPK"
 #define WS_DEVICE_ERROR_CODE_GENERIC 1501
 #define WS_AUDIO_FRAME_BYTES 1920
-#define WS_AUDIO_QUEUE_DEPTH 8
+#ifdef CONFIG_WATCHER_WS_AUDIO_QUEUE_DEPTH
+#define WS_AUDIO_QUEUE_DEPTH CONFIG_WATCHER_WS_AUDIO_QUEUE_DEPTH
+#else
+#define WS_AUDIO_QUEUE_DEPTH 4
+#endif
 #define WS_AUDIO_WORKER_STACK 4096
 #define WS_AUDIO_WORKER_PRIO 6
 #define WS_AUDIO_WORKER_WAIT_MS 20
 #define WS_AUDIO_WORKER_EXIT_WAIT_MS 300
 #define WS_TTS_FRAME_BYTES 4096
-#define WS_TTS_QUEUE_DEPTH 8
+#ifdef CONFIG_WATCHER_WS_TTS_QUEUE_DEPTH
+#define WS_TTS_QUEUE_DEPTH CONFIG_WATCHER_WS_TTS_QUEUE_DEPTH
+#else
+#define WS_TTS_QUEUE_DEPTH 16
+#endif
 #define WS_TTS_WORKER_STACK 4096
 #define WS_TTS_WORKER_PRIO 7
 #define WS_TTS_WORKER_WAIT_MS 20
@@ -935,7 +944,10 @@ static int ws_send_binary_packet(ws_frame_type_t frame_type, uint8_t flags, cons
         return -1;
     }
 
-    packet = (uint8_t *)malloc(packet_len);
+    packet = (uint8_t *)heap_caps_malloc(packet_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (packet == NULL) {
+        packet = (uint8_t *)heap_caps_malloc(packet_len, MALLOC_CAP_8BIT);
+    }
     if (packet == NULL) {
         ESP_LOGE(TAG, "binary packet alloc failed, len=%u", (unsigned int)packet_len);
         return -1;

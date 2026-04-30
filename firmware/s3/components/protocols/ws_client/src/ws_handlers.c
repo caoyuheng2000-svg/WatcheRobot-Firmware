@@ -5,10 +5,11 @@
 
 #include "ws_handlers.h"
 
-#include "camera_service.h"
 #include "behavior_state_service.h"
+#include "camera_service.h"
 #include "control_ingress.h"
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -246,16 +247,12 @@ static void ws_camera_upload_task(void *arg) {
                 ESP_LOGI(TAG,
                          "ws media timing latest_us{total=%lu lock=%lu send=%lu payload=%u packet=%u ts=%lu} "
                          "avg_us{total=%lu lock=%lu send=%lu} frames=%lu dropped=%lu",
-                         (unsigned long)send_stats.total_us,
-                         (unsigned long)send_stats.lock_wait_us,
-                         (unsigned long)send_stats.send_us,
-                         (unsigned int)send_stats.payload_len,
-                         (unsigned int)send_stats.packet_len,
-                         (unsigned long)timestamp_ms,
+                         (unsigned long)send_stats.total_us, (unsigned long)send_stats.lock_wait_us,
+                         (unsigned long)send_stats.send_us, (unsigned int)send_stats.payload_len,
+                         (unsigned int)send_stats.packet_len, (unsigned long)timestamp_ms,
                          (unsigned long)(send_total_us / frames_sent),
                          (unsigned long)(send_lock_wait_total_us / frames_sent),
-                         (unsigned long)(send_sock_total_us / frames_sent),
-                         (unsigned long)frames_sent,
+                         (unsigned long)(send_sock_total_us / frames_sent), (unsigned long)frames_sent,
                          (unsigned long)frames_dropped);
             }
         }
@@ -280,12 +277,8 @@ static esp_err_t ws_camera_ensure_upload_task(void) {
 
     xSemaphoreGive(s_camera_ctx.lock);
 
-    task_ret = xTaskCreate(ws_camera_upload_task,
-                           "ws_cam_upload",
-                           WS_CAMERA_UPLOAD_TASK_STACK,
-                           NULL,
-                           WS_CAMERA_UPLOAD_TASK_PRIORITY,
-                           &s_camera_ctx.upload_task);
+    task_ret = xTaskCreate(ws_camera_upload_task, "ws_cam_upload", WS_CAMERA_UPLOAD_TASK_STACK, NULL,
+                           WS_CAMERA_UPLOAD_TASK_PRIORITY, &s_camera_ctx.upload_task);
     if (task_ret != pdPASS) {
         if (xSemaphoreTake(s_camera_ctx.lock, portMAX_DELAY) == pdTRUE) {
             s_camera_ctx.upload_task = NULL;
@@ -325,7 +318,10 @@ static void ws_camera_frame_cb(const uint8_t *jpeg, size_t size, uint32_t timest
     }
 
     if (streaming) {
-        jpeg_copy = (uint8_t *)malloc(size);
+        jpeg_copy = (uint8_t *)heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (jpeg_copy == NULL) {
+            jpeg_copy = (uint8_t *)heap_caps_malloc(size, MALLOC_CAP_8BIT);
+        }
         if (jpeg_copy == NULL) {
             ESP_LOGW(TAG, "camera frame drop: alloc failed size=%u", (unsigned int)size);
             if (xSemaphoreTake(s_camera_ctx.lock, portMAX_DELAY) == pdTRUE) {
@@ -563,12 +559,8 @@ static void ws_servo_report_task(void *arg) {
 void ws_handlers_init(void) {
 #if SERVO_POSITION_REPORT_ENABLED
     if (s_servo_report_task == NULL) {
-        if (xTaskCreate(ws_servo_report_task,
-                        "ws_servo_report",
-                        SERVO_REPORT_TASK_STACK,
-                        NULL,
-                        SERVO_REPORT_TASK_PRIORITY,
-                        &s_servo_report_task) != pdPASS) {
+        if (xTaskCreate(ws_servo_report_task, "ws_servo_report", SERVO_REPORT_TASK_STACK, NULL,
+                        SERVO_REPORT_TASK_PRIORITY, &s_servo_report_task) != pdPASS) {
             s_servo_report_task = NULL;
             ESP_LOGE(TAG, "servo report task create failed");
         }
@@ -638,8 +630,8 @@ void on_sys_nack_handler(const ws_sys_nack_t *msg) {
              msg->reason);
     snprintf(req.state_id, sizeof(req.state_id), "%s", "error");
     snprintf(req.text, sizeof(req.text), "%s",
-             msg->reason[0] != '\0' ? msg->reason :
-             (strcmp(msg->type, "sys.client.hello") == 0 ? "Hello Rejected" : ""));
+             msg->reason[0] != '\0' ? msg->reason
+                                    : (strcmp(msg->type, "sys.client.hello") == 0 ? "Hello Rejected" : ""));
 
     if (req.text[0] != '\0' && control_ingress_submit_state_text(&req) != ESP_OK) {
         ESP_LOGW(TAG, "Failed to enqueue error state update");
@@ -682,14 +674,13 @@ void on_servo_handler(const ws_servo_cmd_t *cmd) {
         return;
     }
     req.duration_ms = duration_ms;
-    if ((req.has_x && (req.x_deg < 0 || req.x_deg > 180)) ||
-        (req.has_y && (req.y_deg < 0 || req.y_deg > 180))) {
+    if ((req.has_x && (req.x_deg < 0 || req.x_deg > 180)) || (req.has_y && (req.y_deg < 0 || req.y_deg > 180))) {
         ws_send_sys_nack("ctrl.servo.angle", NULL, "angle_out_of_range");
         return;
     }
 
-    ESP_LOGI(TAG, "servo command: has_x=%d x=%d has_y=%d y=%d duration_ms=%d",
-             req.has_x, req.x_deg, req.has_y, req.y_deg, duration_ms);
+    ESP_LOGI(TAG, "servo command: has_x=%d x=%d has_y=%d y=%d duration_ms=%d", req.has_x, req.x_deg, req.has_y,
+             req.y_deg, duration_ms);
     ret = control_ingress_submit_servo(&req);
     if (ret == ESP_OK) {
         ws_send_sys_ack("ctrl.servo.angle", NULL);
@@ -738,15 +729,8 @@ void on_capture_handler(const ws_capture_cmd_t *cmd) {
     }
 
     command_type = ws_camera_command_type(cmd);
-    ESP_LOGI(TAG,
-             "camera command: type=%s command_id=%s action=%s width=%d height=%d fps=%d quality=%d",
-             command_type,
-             cmd->command_id,
-             cmd->action,
-             cmd->width,
-             cmd->height,
-             cmd->fps,
-             cmd->quality);
+    ESP_LOGI(TAG, "camera command: type=%s command_id=%s action=%s width=%d height=%d fps=%d quality=%d", command_type,
+             cmd->command_id, cmd->action, cmd->width, cmd->height, cmd->fps, cmd->quality);
 
     ret = ws_camera_ensure_ready();
     if (ret != ESP_OK) {
@@ -812,11 +796,8 @@ void on_capture_handler(const ws_capture_cmd_t *cmd) {
             snprintf(config_message, sizeof(config_message), "applied=%dx%d quality_hint=%d", applied_width,
                      applied_height, requested_quality);
         } else {
-            snprintf(config_message,
-                     sizeof(config_message),
-                     "fps=%d quality_hint=%d resolution_unchanged",
-                     cmd->fps > 0 ? cmd->fps : cached_fps,
-                     requested_quality);
+            snprintf(config_message, sizeof(config_message), "fps=%d quality_hint=%d resolution_unchanged",
+                     cmd->fps > 0 ? cmd->fps : cached_fps, requested_quality);
         }
 
         ws_send_sys_ack(command_type, cmd->command_id);
@@ -928,13 +909,8 @@ void on_ai_status_handler(const ws_ai_status_t *event) {
         return;
     }
 
-    ESP_LOGI(TAG,
-             "AI status: status=%s message=%s image=%s action=%s sound=%s",
-             event->status,
-             event->message,
-             event->image_name,
-             event->action_file,
-             event->sound_file);
+    ESP_LOGI(TAG, "AI status: status=%s message=%s image=%s action=%s sound=%s", event->status, event->message,
+             event->image_name, event->action_file, event->sound_file);
 
     ws_copy_string(req.status, sizeof(req.status), event->status);
     ws_copy_string(req.message, sizeof(req.message), event->message);
@@ -984,9 +960,7 @@ void on_transfer_handler(const ws_transfer_cmd_t *cmd) {
     }
     ws_send_ota_progress(0, "rejected", "not_supported");
     ws_send_device_error(WS_DEVICE_ERROR_CODE_OTA, "ota_not_supported");
-    ws_send_sys_nack(cmd->message_type,
-                     cmd->transfer_id[0] != '\0' ? cmd->transfer_id : NULL,
-                     "not_supported");
+    ws_send_sys_nack(cmd->message_type, cmd->transfer_id[0] != '\0' ? cmd->transfer_id : NULL, "not_supported");
 }
 
 ws_router_t ws_handlers_get_router(void) {
