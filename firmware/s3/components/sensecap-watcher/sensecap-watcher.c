@@ -332,6 +332,29 @@ void bsp_set_btn_long_release_cb(void (*cb)(void)) {
     lvgl_port_encoder_btn_register_event_cb(tp, BUTTON_LONG_PRESS_UP, bsp_btn_cb, cb);
 }
 
+esp_err_t bsp_set_btn_single_click_cb(void (*cb)(void)) {
+    lv_indev_t *tp = NULL;
+    while (1) {
+        tp = lv_indev_get_next(tp);
+        if (tp == NULL || tp->driver->type == LV_INDEV_TYPE_ENCODER) {
+            break;
+        }
+    }
+
+    if (tp == NULL) {
+        ESP_LOGE(TAG, "No encoder found");
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    esp_err_t ret = lvgl_port_encoder_btn_register_event_cb(tp, BUTTON_SINGLE_CLICK, bsp_btn_cb, cb);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register single-click callback: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "Registered single-click callback");
+    }
+    return ret;
+}
+
 void bsp_set_btn_multi_click_cb(int click_count, void (*cb)(void)) {
     lv_indev_t *tp = NULL;
     while (1) {
