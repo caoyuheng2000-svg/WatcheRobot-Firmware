@@ -487,6 +487,10 @@ void hal_wake_word_stop(wake_word_ctx_t *ctx) {
     if (ctx->state_lock != NULL &&
         xSemaphoreTake(ctx->state_lock, pdMS_TO_TICKS(DETECTION_STOP_WAIT_MS)) == pdTRUE) {
         state_locked = true;
+    } else {
+        ESP_LOGW(TAG, "Wake word state lock busy after %u ms; skip AFE reset", (unsigned)DETECTION_STOP_WAIT_MS);
+        ESP_LOGI(TAG, "Wake word detection stopped");
+        return;
     }
 
     /* Clear input buffer */

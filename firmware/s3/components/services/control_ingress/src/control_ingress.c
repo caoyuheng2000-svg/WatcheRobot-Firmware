@@ -155,6 +155,7 @@ static esp_err_t control_apply_ai_status(const control_ai_status_request_t *req)
     char fallback_state_id[sizeof(req->status)];
     char image_name[sizeof(req->image_name)];
     char sound_id[sizeof(req->sound_file)];
+    const char *status_sound_id = "";
     const char *state_candidates[3] = {0};
     const char *action_candidates[3] = {0};
     const char *selected_action_id = NULL;
@@ -172,6 +173,9 @@ static esp_err_t control_apply_ai_status(const control_ai_status_request_t *req)
                                     sizeof(fallback_state_id));
 
     text = req->message[0] != '\0' ? req->message : NULL;
+    /* Cloud AI status already has a following TTS stream. Do not let status-provided
+     * sound_file (typically "thinking") or state defaults steal the shared I2S path. */
+    (void)sound_id;
 
     control_append_state_candidate(state_candidates, &state_candidate_count, 3, action_state_id);
     control_append_state_candidate(state_candidates, &state_candidate_count, 3, status_state_id);
@@ -190,7 +194,7 @@ static esp_err_t control_apply_ai_status(const control_ai_status_request_t *req)
     for (i = 0; i < state_candidate_count; ++i) {
         ret = behavior_state_set_with_resources_and_action(state_candidates[i], text, 0,
                                                            image_name[0] != '\0' ? image_name : NULL,
-                                                           sound_id[0] != '\0' ? sound_id : NULL, selected_action_id);
+                                                           status_sound_id, selected_action_id);
         if (ret != ESP_ERR_NOT_FOUND) {
             break;
         }
@@ -199,7 +203,7 @@ static esp_err_t control_apply_ai_status(const control_ai_status_request_t *req)
     if (ret == ESP_ERR_NOT_FOUND) {
         ret =
             behavior_state_set_with_resources_and_action("standby", text, 0, image_name[0] != '\0' ? image_name : NULL,
-                                                         sound_id[0] != '\0' ? sound_id : NULL, selected_action_id);
+                                                         status_sound_id, selected_action_id);
         if (ret == ESP_ERR_NOT_FOUND) {
             ESP_LOGW(TAG, "No local match for AI status=%s action=%s fallback=%s image=%s", req->status,
                      action_state_id[0] != '\0' ? action_state_id : "<none>",
@@ -252,7 +256,8 @@ static void control_state_task(void *arg) {
             esp_err_t ret;
 
             if (msg.data.state_text.state_id[0] != '\0') {
-                ret = behavior_state_set_with_text(msg.data.state_text.state_id, text, msg.data.state_text.font_size);
+                ret = behavior_state_set_with_resources(msg.data.state_text.state_id, text,
+                                                        msg.data.state_text.font_size, NULL, "");
             } else if (text != NULL) {
                 ret = behavior_state_set_text(text, msg.data.state_text.font_size);
             } else {

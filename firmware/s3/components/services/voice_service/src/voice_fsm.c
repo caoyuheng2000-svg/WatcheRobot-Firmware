@@ -18,9 +18,11 @@
 
 #define TAG "VOICE"
 #define LISTENING_UI_MIN_INTERNAL_FREE_BYTES (28U * 1024U)
-#define LISTENING_UI_MIN_INTERNAL_LARGEST_BYTES (16U * 1024U)
-#define LISTENING_UI_TEXT_ONLY_MIN_INTERNAL_FREE_BYTES (24U * 1024U)
-#define LISTENING_UI_TEXT_ONLY_MIN_INTERNAL_LARGEST_BYTES (14U * 1024U)
+#define LISTENING_UI_MIN_INTERNAL_LARGEST_BYTES (8U * 1024U)
+#define LISTENING_UI_TEXT_ONLY_MIN_INTERNAL_FREE_BYTES (20U * 1024U)
+#define LISTENING_UI_TEXT_ONLY_MIN_INTERNAL_LARGEST_BYTES (6U * 1024U)
+#define RECORDING_FREEZE_MIN_INTERNAL_FREE_BYTES (24U * 1024U)
+#define RECORDING_FREEZE_MIN_INTERNAL_LARGEST_BYTES (14U * 1024U)
 
 /* ------------------------------------------------------------------ */
 /* Private: Wake word context                                         */
@@ -119,7 +121,18 @@ static bool has_text_only_listening_ui_headroom(size_t *free_internal_out, size_
 }
 
 static bool can_freeze_animation_for_recording(size_t *free_internal_out, size_t *largest_internal_out) {
-    return has_text_only_listening_ui_headroom(free_internal_out, largest_internal_out);
+    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+
+    if (free_internal_out != NULL) {
+        *free_internal_out = free_internal;
+    }
+    if (largest_internal_out != NULL) {
+        *largest_internal_out = largest_internal;
+    }
+
+    return free_internal >= RECORDING_FREEZE_MIN_INTERNAL_FREE_BYTES &&
+           largest_internal >= RECORDING_FREEZE_MIN_INTERNAL_LARGEST_BYTES;
 }
 
 static void freeze_current_animation(void) {
@@ -142,14 +155,14 @@ static void show_listening_ui(void) {
     }
 
     if (has_listening_ui_headroom(&free_internal, &largest_internal)) {
-        behavior_state_set_with_text("listening", "Listening...", 0);
+        behavior_state_set_with_resources("listening", "Listening...", 0, NULL, "");
         return;
     }
 
     if (has_text_only_listening_ui_headroom(&free_internal, &largest_internal)) {
         ESP_LOGW(TAG, "Low internal heap, using text-only listening UI: free=%u KB largest=%u KB",
                  (unsigned)(free_internal / 1024U), (unsigned)(largest_internal / 1024U));
-        behavior_state_set_text_style("Listening...", 24, false);
+        behavior_state_set_with_resources("listening", "Listening...", 24, "", "");
         return;
     }
 

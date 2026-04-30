@@ -117,6 +117,13 @@ int hal_audio_start(void) {
         }
     }
 
+    if (is_running) {
+        consecutive_read_failures = 0;
+        ESP_LOGD(TAG, "Audio already running (sample rate: %lu Hz, playback=%d)", current_sample_rate,
+                 is_playback_mode);
+        return 0;
+    }
+
     esp_err_t ret = bsp_codec_set_fs(current_sample_rate, 16, 1);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to open audio path at %lu Hz: %s", current_sample_rate, esp_err_to_name(ret));
