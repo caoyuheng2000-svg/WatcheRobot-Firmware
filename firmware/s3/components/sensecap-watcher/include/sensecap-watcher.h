@@ -291,6 +291,7 @@ esp_err_t bsp_knob_btn_deinit(void *param);
 void bsp_set_btn_long_press_cb(void (*cb)(void));
 void bsp_set_btn_long_press_ms_cb(uint16_t press_time_ms, void (*cb)(void));
 void bsp_set_btn_long_release_cb(void (*cb)(void));
+esp_err_t bsp_set_btn_single_click_cb(void (*cb)(void));
 
 /**
  * @brief Set button multiple click callback

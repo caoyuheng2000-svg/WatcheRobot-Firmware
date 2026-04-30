@@ -3,10 +3,9 @@ idf_component_register(
         "src/voice_fsm.c"
         "src/hal_wake_word.c"
     INCLUDE_DIRS "include"
-    REQUIRES "hal_audio" "hal_button" "freertos"
+    REQUIRES "hal_audio" "freertos"
     PRIV_REQUIRES
         "sensecap-watcher"
-        "esp_timer"
         "ws_client"
         "behavior_state_service"
         "anim_service"

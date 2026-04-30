@@ -318,6 +318,8 @@ static void configure_runtime_log_levels(void) {
     esp_log_level_set(TAG, ESP_LOG_INFO);
     esp_log_level_set(MCU_OBS_TAG, ESP_LOG_INFO);
     esp_log_level_set("MEM_MON", ESP_LOG_INFO);
+    esp_log_level_set("BSP", ESP_LOG_INFO);
+    esp_log_level_set("VOICE", ESP_LOG_INFO);
 #endif
 }
 
@@ -935,9 +937,9 @@ static void transport_suspend_cloud_runtime_for_low_memory(const char *reason) {
     s_ws_stack_ready = false;
     LOG_HEAP_STATE("lowmem_recovery_after_ws_deinit");
 
-    voice_recorder_stop();
+    voice_recorder_suspend_cloud_audio();
     s_cloud_runtime_started = false;
-    LOG_HEAP_STATE("lowmem_recovery_after_voice_stop");
+    LOG_HEAP_STATE("lowmem_recovery_after_voice_suspend");
 }
 
 static void transport_enter_low_memory_recovery(const char *reason) {
@@ -1244,9 +1246,9 @@ static void ensure_cloud_runtime_started(void) {
         return;
     }
 
-    voice_recorder_init();
     if (voice_recorder_start() != 0) {
         ESP_LOGE(TAG, "Failed to start voice recorder (non-fatal)");
+        return;
     }
 
     s_cloud_runtime_started = true;
@@ -1739,6 +1741,10 @@ void app_main(void) {
     hal_display_ui_init();
     s_ui_ready = true;
     init_runtime_inputs_and_restart_path();
+    voice_recorder_init();
+    if (voice_recorder_start() != 0) {
+        ESP_LOGE(TAG, "Failed to start voice recorder button runtime (non-fatal)");
+    }
     behavior_state_set("boot");
     wait_for_behavior_idle(STARTUP_BEHAVIOR_TIMEOUT_MS);
     behavior_state_set_text_style("BLE Ready", 0, false);

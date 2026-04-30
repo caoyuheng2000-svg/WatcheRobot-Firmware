@@ -13,10 +13,9 @@ typedef enum {
 /* Voice recorder events */
 typedef enum {
     VOICE_EVENT_NONE = 0,
-    VOICE_EVENT_BUTTON_PRESS,   /* Short press toggle - start recording */
-    VOICE_EVENT_BUTTON_RELEASE, /* Short press toggle - stop recording */
-    VOICE_EVENT_TIMEOUT,        /* Max recording time reached */
-    VOICE_EVENT_WAKE_WORD,      /* Wake word detected - start recording */
+    VOICE_EVENT_BUTTON_SHORT_CLICK, /* Debounced single-click toggle */
+    VOICE_EVENT_TIMEOUT,            /* Max recording time reached */
+    VOICE_EVENT_WAKE_WORD,          /* Wake word detected - start recording */
 } voice_event_t;
 
 /* Voice recorder statistics */
@@ -38,7 +37,7 @@ void voice_recorder_init(void);
 voice_state_t voice_recorder_get_state(void);
 
 /**
- * Process an event (called from button interrupt or timer)
+ * Process an event (called from recorder task or timer)
  */
 void voice_recorder_process_event(voice_event_t event);
 
@@ -71,6 +70,12 @@ int voice_recorder_start(void);
  * Stop voice recorder system
  */
 void voice_recorder_stop(void);
+
+/**
+ * Release active recording/cloud audio state while keeping the button
+ * event consumer running.
+ */
+void voice_recorder_suspend_cloud_audio(void);
 
 /**
  * Resume wake word detection after TTS playback

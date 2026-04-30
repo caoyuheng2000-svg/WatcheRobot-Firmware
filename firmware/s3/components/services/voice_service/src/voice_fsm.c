@@ -1,14 +1,15 @@
 #include "anim_player.h"
 #include "behavior_state_service.h"
+#include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
-#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "hal_audio.h"
-#include "hal_button.h"
 #include "hal_wake_word.h"
+#include "sensecap-watcher.h"
 #include "voice_service.h"
 #include "ws_client.h"
 #include <math.h>
@@ -39,8 +40,10 @@ static void wake_word_cleanup(void);
 
 static voice_state_t g_state = VOICE_STATE_IDLE;
 static voice_stats_t g_stats = {0};
-static bool g_button_pressed = false;
-static int64_t g_button_press_start_ms = 0;
+static QueueHandle_t g_event_queue = NULL;
+static TaskHandle_t g_voice_task_handle = NULL;
+static volatile bool g_task_running = false;
+static bool g_button_callback_registered = false;
 
 /* Track how recording was triggered (for button behavior) */
 static bool g_recording_triggered_by_wake_word = false;
@@ -50,7 +53,7 @@ static bool g_recording_triggered_by_wake_word = false;
 
 static uint8_t g_pcm_buf[PCM_FRAME_SIZE];
 
-#define BUTTON_SHORT_PRESS_MAX_MS 3000
+#define VOICE_EVENT_QUEUE_LEN 4
 
 #if CONFIG_WATCHER_LOG_HEAP_DIAGNOSTICS
 #define LOG_INTERNAL_HEAP_STATE(stage) log_internal_heap_state(stage)
@@ -348,8 +351,22 @@ static int stop_recording(void) {
     return 0;
 }
 
-static int64_t voice_now_ms(void) {
-    return esp_timer_get_time() / 1000;
+void voice_recorder_suspend_cloud_audio(void) {
+    if (g_state == VOICE_STATE_RECORDING) {
+        ESP_LOGW(TAG, "Suspending active recording without stopping button runtime");
+        hal_audio_stop();
+
+#ifdef CONFIG_ENABLE_WAKE_WORD
+        vad_disable();
+#endif
+
+        g_state = VOICE_STATE_IDLE;
+        g_recording_triggered_by_wake_word = false;
+    }
+
+    if (g_event_queue != NULL) {
+        xQueueReset(g_event_queue);
+    }
 }
 
 static void handle_short_press_toggle(void) {
@@ -362,7 +379,7 @@ static void handle_short_press_toggle(void) {
 
         ESP_LOGI(TAG, "Short press - starting recording");
         g_recording_triggered_by_wake_word = false;
-        voice_recorder_process_event(VOICE_EVENT_BUTTON_PRESS);
+        voice_recorder_process_event(VOICE_EVENT_BUTTON_SHORT_CLICK);
         if (g_state == VOICE_STATE_RECORDING) {
             show_listening_ui();
         } else {
@@ -373,7 +390,7 @@ static void handle_short_press_toggle(void) {
 
     if (g_state == VOICE_STATE_RECORDING) {
         ESP_LOGI(TAG, "Short press - stopping recording");
-        voice_recorder_process_event(VOICE_EVENT_BUTTON_RELEASE);
+        voice_recorder_process_event(VOICE_EVENT_BUTTON_SHORT_CLICK);
         behavior_state_set_with_text("processing", "Processing...", 0);
     }
 }
@@ -385,7 +402,7 @@ static void handle_short_press_toggle(void) {
 void voice_recorder_process_event(voice_event_t event) {
     switch (g_state) {
     case VOICE_STATE_IDLE:
-        if (event == VOICE_EVENT_BUTTON_PRESS || event == VOICE_EVENT_WAKE_WORD) {
+        if (event == VOICE_EVENT_BUTTON_SHORT_CLICK || event == VOICE_EVENT_WAKE_WORD) {
 #ifdef CONFIG_ENABLE_WAKE_WORD
             if (event == VOICE_EVENT_WAKE_WORD) {
                 ESP_LOGI(TAG, "Wake word triggered recording");
@@ -396,7 +413,7 @@ void voice_recorder_process_event(voice_event_t event) {
         break;
 
     case VOICE_STATE_RECORDING:
-        if (event == VOICE_EVENT_BUTTON_RELEASE || event == VOICE_EVENT_TIMEOUT) {
+        if (event == VOICE_EVENT_BUTTON_SHORT_CLICK || event == VOICE_EVENT_TIMEOUT) {
             stop_recording();
         }
         break;
@@ -528,43 +545,40 @@ int voice_recorder_tick(void) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Private: Button callback (called from task context via poll)        */
+/* Private: Button callback                                           */
 /* ------------------------------------------------------------------ */
 
-static void button_callback(bool pressed) {
-    /* This is called from task context (via hal_button_poll) */
-    if (pressed) {
-        g_button_pressed = true;
-        g_button_press_start_ms = voice_now_ms();
-        ESP_LOGI(TAG, "Button press started");
+static void button_single_click_callback(void) {
+    voice_event_t event = VOICE_EVENT_BUTTON_SHORT_CLICK;
+
+    if (!g_task_running || g_event_queue == NULL) {
+        ESP_LOGI(TAG, "Ignoring button click: recorder task not running");
         return;
     }
 
-    int64_t released_ms = voice_now_ms();
-    if (g_button_press_start_ms <= 0) {
-        ESP_LOGI(TAG, "Ignoring release without tracked press");
-        g_button_pressed = false;
+    if (xQueueSend(g_event_queue, &event, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "Dropping button click: voice event queue full");
         return;
     }
 
-    int64_t held_ms = g_button_press_start_ms > 0 ? released_ms - g_button_press_start_ms : 0;
+    ESP_LOGI(TAG, "Queued button single-click event");
+}
 
-    g_button_pressed = false;
-    g_button_press_start_ms = 0;
+static void voice_process_pending_events(void) {
+    voice_event_t event = VOICE_EVENT_NONE;
 
-    if (held_ms <= BUTTON_SHORT_PRESS_MAX_MS) {
-        handle_short_press_toggle();
-    } else {
-        ESP_LOGI(TAG, "Ignoring medium press (%lld ms)", (long long)held_ms);
+    while (g_event_queue != NULL && xQueueReceive(g_event_queue, &event, 0) == pdTRUE) {
+        if (event == VOICE_EVENT_BUTTON_SHORT_CLICK) {
+            handle_short_press_toggle();
+        } else {
+            voice_recorder_process_event(event);
+        }
     }
 }
 
 /* ------------------------------------------------------------------ */
 /* Private: Voice recorder task                                        */
 /* ------------------------------------------------------------------ */
-
-static TaskHandle_t g_voice_task_handle = NULL;
-static volatile bool g_task_running = false;
 
 /* Tick interval: 60ms for Opus frame size */
 #define TICK_INTERVAL_MS 60
@@ -585,8 +599,7 @@ static void voice_recorder_task(void *arg) {
     ESP_LOGI(TAG, "Voice recorder task started");
 
     while (g_task_running) {
-        /* Poll button state via IO expander */
-        hal_button_poll();
+        voice_process_pending_events();
 
         /* Process audio capture/upload if recording */
         voice_recorder_tick();
@@ -649,8 +662,6 @@ static void wake_word_cleanup(void) {
 /* ------------------------------------------------------------------ */
 
 int voice_recorder_start(void) {
-    bool button_ready = hal_button_io_ready();
-
     if (g_task_running && g_voice_task_handle != NULL) {
         ESP_LOGI(TAG, "Voice recorder already running");
         return 0;
@@ -661,6 +672,16 @@ int voice_recorder_start(void) {
         return -1;
     }
 
+    if (g_event_queue == NULL) {
+        g_event_queue = xQueueCreate(VOICE_EVENT_QUEUE_LEN, sizeof(voice_event_t));
+        if (g_event_queue == NULL) {
+            ESP_LOGE(TAG, "Voice event queue create failed");
+            return -1;
+        }
+    } else {
+        xQueueReset(g_event_queue);
+    }
+
 #ifdef CONFIG_ENABLE_WAKE_WORD
     /* Avoid reserving audio DMA at boot. On S3 this can starve UI/WS/camera
      * of internal heap and lead to resets before the user even starts
@@ -669,12 +690,15 @@ int voice_recorder_start(void) {
     ESP_LOGW(TAG, "Wake word boot activation disabled; audio will start on demand");
 #endif
 
-    if (!button_ready) {
-        ESP_LOGW(TAG, "Voice button unavailable, starting recorder without button input");
-    } else if (hal_button_init(button_callback) != 0) {
-        ESP_LOGW(TAG, "Button init failed, continuing without button input");
-    } else {
-        ESP_LOGI(TAG, "Button initialized via IO expander");
+    if (!g_button_callback_registered) {
+        esp_err_t btn_ret = bsp_set_btn_single_click_cb(button_single_click_callback);
+        if (btn_ret == ESP_OK) {
+            g_button_callback_registered = true;
+            ESP_LOGI(TAG, "Voice button single-click handler registered");
+        } else {
+            ESP_LOGW(TAG, "Voice button unavailable, starting recorder without button input: %s",
+                     esp_err_to_name(btn_ret));
+        }
     }
 
     /* Start voice recorder task */
@@ -699,8 +723,6 @@ void voice_recorder_stop(void) {
     bool had_runtime = g_task_running || g_voice_task_handle != NULL;
 
     g_task_running = false;
-    g_button_pressed = false;
-    g_button_press_start_ms = 0;
 
     if (g_voice_task_handle != NULL && !voice_wait_for_task_exit(VOICE_TASK_EXIT_WAIT_MS)) {
         ESP_LOGW(TAG, "Voice recorder task did not exit within %u ms", (unsigned)VOICE_TASK_EXIT_WAIT_MS);
@@ -711,7 +733,10 @@ void voice_recorder_stop(void) {
     wake_word_cleanup();
 #endif
 
-    hal_button_deinit();
+    if (g_event_queue != NULL) {
+        xQueueReset(g_event_queue);
+    }
+
     if (had_runtime) {
         ESP_LOGI(TAG, "Voice recorder stopped");
     } else {
