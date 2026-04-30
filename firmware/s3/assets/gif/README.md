@@ -16,6 +16,22 @@ Recommended canonical filenames:
 - `custom1.gif`
 - `custom2.gif`
 - `custom3.gif`
+- `standby1.gif`
+- `standby2.gif`
+- `standby3.gif`
+- `standby4.gif`
+- `disconnect.gif`
+- `shock.gif`
+- `sunglasses.gif`
+- `sad.gif`
+- `get.gif`
+- `smile.gif`
+- `recharge.gif`
+- `speechless.gif`
+- `concentration.gif`
+- `fondle_love.gif`
+- `fondle_anger.gif`
+- `blink.gif`
 
 Legacy names such as `watcher-boot.gif` are still accepted for compatibility.
 
@@ -28,13 +44,15 @@ python tools/sync_anim_sdcard.py --target-root F:\
 
 Generated output is written to:
 
-- `release/v0.2.6/sdcard/anim/`
+- `release/V2.0.0/sdcard/anim/`
 
 Current release note:
 
 - The runtime pipeline is already integrated into the current release flow.
-- The current packaged animation set includes 12 generated types.
-- `custom1`, `custom2`, and `custom3` are packaged in the current release.
+- The current packaged animation set includes 28 generated types.
+- `custom1`, `custom2`, `custom3`, and `standby1` through `standby4` are packaged in the current release.
+- Extended WebSocket-callable animations such as `disconnect`, `sad`, `blink`,
+  `fondle_love`, and `fondle_anger` are also packaged in the current release.
 
 For the full branch guide and roadmap, see:
 

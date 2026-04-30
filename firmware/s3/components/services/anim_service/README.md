@@ -64,11 +64,13 @@ emoji_anim_prefetch_type(EMOJI_ANIM_LISTENING);
 | `EMOJI_ANIM_SPEAKING` | TTS playback | `speaking1.png` |
 | `EMOJI_ANIM_LISTENING` | Voice recording | `listening1.png` |
 | `EMOJI_ANIM_PROCESSING` | AI/task processing | `processing1.png` |
-| `EMOJI_ANIM_STANDBY` | Idle state | `standby1.png` |
+| `EMOJI_ANIM_STANDBY` | Idle state | `standby.gif` |
 | `EMOJI_ANIM_THINKING` | Transitional thinking state | `thinking1.png` |
 | `EMOJI_ANIM_CUSTOM_1` | Reserved custom state | `custom1_001.png` |
 | `EMOJI_ANIM_CUSTOM_2` | Reserved custom state | `custom2_001.png` |
 | `EMOJI_ANIM_CUSTOM_3` | Reserved custom state | `custom3_001.png` |
+| `EMOJI_ANIM_STANDBY_1` ... `EMOJI_ANIM_STANDBY_4` | WebSocket-ready idle variants | `standby1.gif` ... `standby4.gif` |
+| `EMOJI_ANIM_DISCONNECT` ... `EMOJI_ANIM_BLINK` | Extended WebSocket-callable expressions | `disconnect.gif` ... `blink.gif` |
 
 Legacy flat names like `custom31.png` are still supported for compatibility, but new custom resources should use the separated form.
 

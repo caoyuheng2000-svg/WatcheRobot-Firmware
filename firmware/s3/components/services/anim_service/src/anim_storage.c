@@ -10,12 +10,14 @@
 #include "esp_log.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define TAG "ANIM_STORAGE"
 #define ANIM_MANIFEST_VERSION 2U
 #define ANIM_PACK_VERSION 2U
+#define ANIM_MAX_LOOP_DURATION_MS (60 * 60 * 1000)
 
 typedef struct __attribute__((packed)) {
     char magic[4];
@@ -54,8 +56,10 @@ static const char *k_pack_magic = "ANPK";
 static const int k_frame_read_attempts = 3;
 
 static const char *emoji_names[EMOJI_ANIM_COUNT] = {
-    "boot",       "happy",   "error",    "bluetooth", "speaking", "listening",
-    "processing", "standby", "thinking", "custom1",   "custom2",  "custom3",
+    "boot",     "happy",    "error",      "bluetooth",     "speaking",    "listening",    "processing",
+    "standby",  "thinking", "custom1",    "custom2",       "custom3",     "standby1",     "standby2",
+    "standby3", "standby4", "disconnect", "shock",         "sunglasses",  "sad",          "get",
+    "smile",    "recharge", "speechless", "concentration", "fondle_love", "fondle_anger", "blink",
 };
 
 static bool g_catalog_initialized = false;
@@ -232,6 +236,59 @@ int emoji_get_frame_count(emoji_anim_type_t type) {
         return cfg->frame_count;
     }
     return info->frame_count;
+}
+
+int emoji_get_loop_duration_ms(emoji_anim_type_t type) {
+    const anim_catalog_type_info_t *info = anim_catalog_get_type_info(type);
+    if (info == NULL || !info->available || info->frame_count == 0) {
+        return 0;
+    }
+
+    anim_stream_t stream = {0};
+    int64_t duration_ms = 0;
+    if (anim_stream_open(type, &stream) == 0) {
+        int frame_count = emoji_get_frame_count(type);
+        if (frame_count <= 0 || frame_count > stream.frame_count) {
+            frame_count = stream.frame_count;
+        }
+        for (int frame = 0; frame < frame_count; ++frame) {
+            int delay_ms = anim_stream_get_frame_delay_ms(&stream, frame);
+            if (delay_ms > 0) {
+                duration_ms += delay_ms;
+                if (duration_ms > ANIM_MAX_LOOP_DURATION_MS) {
+                    ESP_LOGW(TAG, "Loop duration for %s exceeds cap; clamping to %dms", info->name,
+                             ANIM_MAX_LOOP_DURATION_MS);
+                    duration_ms = ANIM_MAX_LOOP_DURATION_MS;
+                    break;
+                }
+            }
+        }
+        anim_stream_close(&stream);
+        if (duration_ms > 0) {
+            return (int)duration_ms;
+        }
+    }
+
+    int fps = info->fps > 0 ? info->fps : anim_meta_get_fps(type);
+    if (fps <= 0) {
+        fps = anim_meta_get_default_fps();
+    }
+    if (fps <= 0) {
+        return 0;
+    }
+    int64_t fallback_duration_ms = ((int64_t)emoji_get_frame_count(type) * 1000LL) / fps;
+    if (fallback_duration_ms <= 0) {
+        return 0;
+    }
+    if (fallback_duration_ms > ANIM_MAX_LOOP_DURATION_MS) {
+        ESP_LOGW(TAG, "Fallback loop duration for %s exceeds cap; clamping to %dms", info->name,
+                 ANIM_MAX_LOOP_DURATION_MS);
+        return ANIM_MAX_LOOP_DURATION_MS;
+    }
+    if (fallback_duration_ms > INT_MAX) {
+        return INT_MAX;
+    }
+    return (int)fallback_duration_ms;
 }
 
 const char *emoji_type_name(emoji_anim_type_t type) {

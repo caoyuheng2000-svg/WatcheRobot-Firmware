@@ -1,6 +1,6 @@
 #include "display_ui.h"
-#include "hal_display.h"
 #include "esp_log.h"
+#include "hal_display.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -84,6 +84,18 @@ emoji_type_t display_emoji_from_string(const char *emoji_str) {
         strcasecmp_local(emoji_str, "normal") == 0) {
         return EMOJI_STANDBY;
     }
+    if (strcasecmp_local(emoji_str, "standby1") == 0) {
+        return EMOJI_STANDBY_1;
+    }
+    if (strcasecmp_local(emoji_str, "standby2") == 0) {
+        return EMOJI_STANDBY_2;
+    }
+    if (strcasecmp_local(emoji_str, "standby3") == 0) {
+        return EMOJI_STANDBY_3;
+    }
+    if (strcasecmp_local(emoji_str, "standby4") == 0) {
+        return EMOJI_STANDBY_4;
+    }
 
     if (strcasecmp_local(emoji_str, "happy") == 0 || strcasecmp_local(emoji_str, "success") == 0) {
         return EMOJI_HAPPY;
@@ -122,6 +134,42 @@ emoji_type_t display_emoji_from_string(const char *emoji_str) {
     if (strcasecmp_local(emoji_str, "custom3") == 0) {
         return EMOJI_CUSTOM_3;
     }
+    if (strcasecmp_local(emoji_str, "disconnect") == 0) {
+        return EMOJI_DISCONNECT;
+    }
+    if (strcasecmp_local(emoji_str, "shock") == 0) {
+        return EMOJI_SHOCK;
+    }
+    if (strcasecmp_local(emoji_str, "sunglasses") == 0) {
+        return EMOJI_SUNGLASSES;
+    }
+    if (strcasecmp_local(emoji_str, "sad") == 0) {
+        return EMOJI_SAD;
+    }
+    if (strcasecmp_local(emoji_str, "get") == 0) {
+        return EMOJI_GET;
+    }
+    if (strcasecmp_local(emoji_str, "smile") == 0) {
+        return EMOJI_SMILE;
+    }
+    if (strcasecmp_local(emoji_str, "recharge") == 0) {
+        return EMOJI_RECHARGE;
+    }
+    if (strcasecmp_local(emoji_str, "speechless") == 0) {
+        return EMOJI_SPEECHLESS;
+    }
+    if (strcasecmp_local(emoji_str, "concentration") == 0) {
+        return EMOJI_CONCENTRATION;
+    }
+    if (strcasecmp_local(emoji_str, "fondle_love") == 0 || strcasecmp_local(emoji_str, "fondle-love") == 0) {
+        return EMOJI_FONDLE_LOVE;
+    }
+    if (strcasecmp_local(emoji_str, "fondle_anger") == 0 || strcasecmp_local(emoji_str, "fondle-anger") == 0) {
+        return EMOJI_FONDLE_ANGER;
+    }
+    if (strcasecmp_local(emoji_str, "blink") == 0) {
+        return EMOJI_BLINK;
+    }
 
     return EMOJI_UNKNOWN;
 }
@@ -130,10 +178,7 @@ emoji_type_t display_emoji_from_string(const char *emoji_str) {
 /* Public: Update display                                             */
 /* ------------------------------------------------------------------ */
 
-int display_update_with_style(const char *text,
-                              const char *emoji,
-                              int font_size,
-                              display_text_style_t text_style,
+int display_update_with_style(const char *text, const char *emoji, int font_size, display_text_style_t text_style,
                               display_result_t *out_result) {
     emoji_type_t requested_emoji = EMOJI_UNKNOWN;
     int text_changed = 0;
@@ -155,9 +200,8 @@ int display_update_with_style(const char *text,
         }
     }
 
-    text_changed = (text != NULL &&
-                    (!text_equals_current(text) || g_current_font_size != normalized_font_size ||
-                     g_current_text_style != text_style));
+    text_changed = (text != NULL && (!text_equals_current(text) || g_current_font_size != normalized_font_size ||
+                                     g_current_text_style != text_style));
     emoji_changed = (emoji != NULL && requested_emoji != previous_emoji);
 
     /* Update text if provided */
@@ -193,20 +237,15 @@ int display_update_with_style(const char *text,
     if (text != NULL || emoji != NULL) {
         if (!text_changed && !emoji_changed) {
             ESP_LOGI(TAG, "Display update no-op text=%s emoji=%s current_emoji=%d",
-                     text != NULL ? "unchanged" : "skipped",
-                     emoji != NULL ? "unchanged" : "skipped",
+                     text != NULL ? "unchanged" : "skipped", emoji != NULL ? "unchanged" : "skipped",
                      (int)g_current_emoji);
         } else if (emoji_request_attempted && actual_emoji != requested_emoji) {
             if (text_changed) {
-                ESP_LOGI(TAG,
-                         "Display update applied text; emoji pending requested=%d current_emoji=%d",
-                         (int)requested_emoji,
-                         (int)actual_emoji);
+                ESP_LOGI(TAG, "Display update applied text; emoji pending requested=%d current_emoji=%d",
+                         (int)requested_emoji, (int)actual_emoji);
             } else {
-                ESP_LOGI(TAG,
-                         "Display update accepted emoji request pending requested=%d current_emoji=%d",
-                         (int)requested_emoji,
-                         (int)actual_emoji);
+                ESP_LOGI(TAG, "Display update accepted emoji request pending requested=%d current_emoji=%d",
+                         (int)requested_emoji, (int)actual_emoji);
             }
         } else if (text_changed && (actual_emoji != previous_emoji)) {
             ESP_LOGI(TAG, "Display update applied text+emoji emoji_id=%d", (int)actual_emoji);

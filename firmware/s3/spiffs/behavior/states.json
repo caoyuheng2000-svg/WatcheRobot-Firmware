@@ -121,6 +121,102 @@
         { "at_ms": 0, "anim": "custom3", "text": "", "font_size": 24 }
       ],
       "sound": []
+    },
+    "disconnect": {
+      "loop": true,
+      "motion": [],
+      "expression": [
+        { "at_ms": 0, "anim": "disconnect", "text": "", "font_size": 24 }
+      ],
+      "sound": []
+    },
+    "shock": {
+      "loop": true,
+      "motion": [],
+      "expression": [
+        { "at_ms": 0, "anim": "shock", "text": "", "font_size": 24 }
+      ],
+      "sound": []
+    },
+    "sunglasses": {
+      "loop": true,
+      "motion": [],
+      "expression": [
+        { "at_ms": 0, "anim": "sunglasses", "text": "", "font_size": 24 }
+      ],
+      "sound": []
+    },
+    "sad": {
+      "loop": true,
+      "motion": [],
+      "expression": [
+        { "at_ms": 0, "anim": "sad", "text": "", "font_size": 24 }
+      ],
+      "sound": []
+    },
+    "get": {
+      "loop": true,
+      "motion": [],
+      "expression": [
+        { "at_ms": 0, "anim": "get", "text": "", "font_size": 24 }
+      ],
+      "sound": []
+    },
+    "smile": {
+      "loop": true,
+      "motion": [],
+      "expression": [
+        { "at_ms": 0, "anim": "smile", "text": "", "font_size": 24 }
+      ],
+      "sound": []
+    },
+    "recharge": {
+      "loop": true,
+      "motion": [],
+      "expression": [
+        { "at_ms": 0, "anim": "recharge", "text": "", "font_size": 24 }
+      ],
+      "sound": []
+    },
+    "speechless": {
+      "loop": true,
+      "motion": [],
+      "expression": [
+        { "at_ms": 0, "anim": "speechless", "text": "", "font_size": 24 }
+      ],
+      "sound": []
+    },
+    "concentration": {
+      "loop": true,
+      "motion": [],
+      "expression": [
+        { "at_ms": 0, "anim": "concentration", "text": "", "font_size": 24 }
+      ],
+      "sound": []
+    },
+    "fondle_love": {
+      "loop": true,
+      "motion": [],
+      "expression": [
+        { "at_ms": 0, "anim": "fondle_love", "text": "", "font_size": 24 }
+      ],
+      "sound": []
+    },
+    "fondle_anger": {
+      "loop": true,
+      "motion": [],
+      "expression": [
+        { "at_ms": 0, "anim": "fondle_anger", "text": "", "font_size": 24 }
+      ],
+      "sound": []
+    },
+    "blink": {
+      "loop": true,
+      "motion": [],
+      "expression": [
+        { "at_ms": 0, "anim": "blink", "text": "", "font_size": 24 }
+      ],
+      "sound": []
     }
   }
 }
