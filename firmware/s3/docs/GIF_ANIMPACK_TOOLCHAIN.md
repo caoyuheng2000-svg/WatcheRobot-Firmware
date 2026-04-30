@@ -30,6 +30,18 @@ Supported source names are the canonical animation names:
 - `standby2.gif`
 - `standby3.gif`
 - `standby4.gif`
+- `disconnect.gif`
+- `shock.gif`
+- `sunglasses.gif`
+- `sad.gif`
+- `get.gif`
+- `smile.gif`
+- `recharge.gif`
+- `speechless.gif`
+- `concentration.gif`
+- `fondle_love.gif`
+- `fondle_anger.gif`
+- `blink.gif`
 
 Legacy names such as `watcher-boot.gif` remain accepted by the converter, and
 legacy PNG sequence folders are still supported as a fallback during the

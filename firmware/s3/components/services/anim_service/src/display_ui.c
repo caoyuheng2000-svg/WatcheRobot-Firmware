@@ -134,6 +134,42 @@ emoji_type_t display_emoji_from_string(const char *emoji_str) {
     if (strcasecmp_local(emoji_str, "custom3") == 0) {
         return EMOJI_CUSTOM_3;
     }
+    if (strcasecmp_local(emoji_str, "disconnect") == 0) {
+        return EMOJI_DISCONNECT;
+    }
+    if (strcasecmp_local(emoji_str, "shock") == 0) {
+        return EMOJI_SHOCK;
+    }
+    if (strcasecmp_local(emoji_str, "sunglasses") == 0) {
+        return EMOJI_SUNGLASSES;
+    }
+    if (strcasecmp_local(emoji_str, "sad") == 0) {
+        return EMOJI_SAD;
+    }
+    if (strcasecmp_local(emoji_str, "get") == 0) {
+        return EMOJI_GET;
+    }
+    if (strcasecmp_local(emoji_str, "smile") == 0) {
+        return EMOJI_SMILE;
+    }
+    if (strcasecmp_local(emoji_str, "recharge") == 0) {
+        return EMOJI_RECHARGE;
+    }
+    if (strcasecmp_local(emoji_str, "speechless") == 0) {
+        return EMOJI_SPEECHLESS;
+    }
+    if (strcasecmp_local(emoji_str, "concentration") == 0) {
+        return EMOJI_CONCENTRATION;
+    }
+    if (strcasecmp_local(emoji_str, "fondle_love") == 0 || strcasecmp_local(emoji_str, "fondle-love") == 0) {
+        return EMOJI_FONDLE_LOVE;
+    }
+    if (strcasecmp_local(emoji_str, "fondle_anger") == 0 || strcasecmp_local(emoji_str, "fondle-anger") == 0) {
+        return EMOJI_FONDLE_ANGER;
+    }
+    if (strcasecmp_local(emoji_str, "blink") == 0) {
+        return EMOJI_BLINK;
+    }
 
     return EMOJI_UNKNOWN;
 }

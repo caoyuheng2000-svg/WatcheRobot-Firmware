@@ -56,8 +56,10 @@ static const char *k_pack_magic = "ANPK";
 static const int k_frame_read_attempts = 3;
 
 static const char *emoji_names[EMOJI_ANIM_COUNT] = {
-    "boot",     "happy",   "error",   "bluetooth", "speaking", "listening", "processing", "standby",
-    "thinking", "custom1", "custom2", "custom3",   "standby1", "standby2",  "standby3",   "standby4",
+    "boot",     "happy",    "error",      "bluetooth",     "speaking",    "listening",    "processing",
+    "standby",  "thinking", "custom1",    "custom2",       "custom3",     "standby1",     "standby2",
+    "standby3", "standby4", "disconnect", "shock",         "sunglasses",  "sad",          "get",
+    "smile",    "recharge", "speechless", "concentration", "fondle_love", "fondle_anger", "blink",
 };
 
 static bool g_catalog_initialized = false;

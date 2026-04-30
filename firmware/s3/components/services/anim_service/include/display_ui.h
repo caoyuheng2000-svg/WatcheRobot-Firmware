@@ -6,22 +6,34 @@
 
 /* Supported UI emoji types - mapped to unified animation names */
 typedef enum {
-    EMOJI_STANDBY = 0, /* standby - idle/default state */
-    EMOJI_HAPPY,       /* happy */
-    EMOJI_LISTENING,   /* listening - recording user voice */
-    EMOJI_THINKING,    /* thinking - short transitional state */
-    EMOJI_PROCESSING,  /* processing - AI/task execution */
-    EMOJI_SPEAKING,    /* speaking - TTS playback */
-    EMOJI_ERROR,       /* error - failure/interruption */
-    EMOJI_BLUETOOTH,   /* bluetooth - paired/connecting state */
-    EMOJI_CUSTOM_1,    /* reserved custom state */
-    EMOJI_CUSTOM_2,    /* reserved custom state */
-    EMOJI_CUSTOM_3,    /* reserved custom state */
-    EMOJI_STANDBY_1,   /* WebSocket-ready idle variant */
-    EMOJI_STANDBY_2,   /* WebSocket-ready idle variant */
-    EMOJI_STANDBY_3,   /* WebSocket-ready idle variant */
-    EMOJI_STANDBY_4,   /* WebSocket-ready idle variant */
-    EMOJI_COUNT,       /* Sentinel */
+    EMOJI_STANDBY = 0,   /* standby - idle/default state */
+    EMOJI_HAPPY,         /* happy */
+    EMOJI_LISTENING,     /* listening - recording user voice */
+    EMOJI_THINKING,      /* thinking - short transitional state */
+    EMOJI_PROCESSING,    /* processing - AI/task execution */
+    EMOJI_SPEAKING,      /* speaking - TTS playback */
+    EMOJI_ERROR,         /* error - failure/interruption */
+    EMOJI_BLUETOOTH,     /* bluetooth - paired/connecting state */
+    EMOJI_CUSTOM_1,      /* reserved custom state */
+    EMOJI_CUSTOM_2,      /* reserved custom state */
+    EMOJI_CUSTOM_3,      /* reserved custom state */
+    EMOJI_STANDBY_1,     /* WebSocket-ready idle variant */
+    EMOJI_STANDBY_2,     /* WebSocket-ready idle variant */
+    EMOJI_STANDBY_3,     /* WebSocket-ready idle variant */
+    EMOJI_STANDBY_4,     /* WebSocket-ready idle variant */
+    EMOJI_DISCONNECT,    /* disconnect */
+    EMOJI_SHOCK,         /* shock */
+    EMOJI_SUNGLASSES,    /* sunglasses */
+    EMOJI_SAD,           /* sad */
+    EMOJI_GET,           /* get */
+    EMOJI_SMILE,         /* smile */
+    EMOJI_RECHARGE,      /* recharge */
+    EMOJI_SPEECHLESS,    /* speechless */
+    EMOJI_CONCENTRATION, /* concentration */
+    EMOJI_FONDLE_LOVE,   /* fondle_love */
+    EMOJI_FONDLE_ANGER,  /* fondle_anger */
+    EMOJI_BLINK,         /* blink */
+    EMOJI_COUNT,         /* Sentinel */
     EMOJI_UNKNOWN = -1,
 } emoji_type_t;
 

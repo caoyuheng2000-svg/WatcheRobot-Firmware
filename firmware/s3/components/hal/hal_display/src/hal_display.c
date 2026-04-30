@@ -356,6 +356,30 @@ static const char *hal_display_emoji_name(int emoji_id) {
         return "standby3";
     case 14:
         return "standby4";
+    case 15:
+        return "disconnect";
+    case 16:
+        return "shock";
+    case 17:
+        return "sunglasses";
+    case 18:
+        return "sad";
+    case 19:
+        return "get";
+    case 20:
+        return "smile";
+    case 21:
+        return "recharge";
+    case 22:
+        return "speechless";
+    case 23:
+        return "concentration";
+    case 24:
+        return "fondle_love";
+    case 25:
+        return "fondle_anger";
+    case 26:
+        return "blink";
     default:
         return "unknown";
     }
@@ -393,6 +417,30 @@ static int hal_display_anim_type_to_emoji_id(emoji_anim_type_t type) {
         return EMOJI_STANDBY_3;
     case EMOJI_ANIM_STANDBY_4:
         return EMOJI_STANDBY_4;
+    case EMOJI_ANIM_DISCONNECT:
+        return EMOJI_DISCONNECT;
+    case EMOJI_ANIM_SHOCK:
+        return EMOJI_SHOCK;
+    case EMOJI_ANIM_SUNGLASSES:
+        return EMOJI_SUNGLASSES;
+    case EMOJI_ANIM_SAD:
+        return EMOJI_SAD;
+    case EMOJI_ANIM_GET:
+        return EMOJI_GET;
+    case EMOJI_ANIM_SMILE:
+        return EMOJI_SMILE;
+    case EMOJI_ANIM_RECHARGE:
+        return EMOJI_RECHARGE;
+    case EMOJI_ANIM_SPEECHLESS:
+        return EMOJI_SPEECHLESS;
+    case EMOJI_ANIM_CONCENTRATION:
+        return EMOJI_CONCENTRATION;
+    case EMOJI_ANIM_FONDLE_LOVE:
+        return EMOJI_FONDLE_LOVE;
+    case EMOJI_ANIM_FONDLE_ANGER:
+        return EMOJI_FONDLE_ANGER;
+    case EMOJI_ANIM_BLINK:
+        return EMOJI_BLINK;
     default:
         return -1;
     }
@@ -401,36 +449,60 @@ static int hal_display_anim_type_to_emoji_id(emoji_anim_type_t type) {
 /* Map display_ui emoji_type to unified internal animation types. */
 static emoji_anim_type_t map_emoji_type(int ui_emoji_id) {
     switch (ui_emoji_id) {
-    case 0:                           /* EMOJI_STANDBY */
-        return EMOJI_ANIM_STANDBY;    /* standby */
-    case 1:                           /* EMOJI_HAPPY */
-        return EMOJI_ANIM_HAPPY;      /* happy */
-    case 2:                           /* EMOJI_LISTENING */
-        return EMOJI_ANIM_LISTENING;  /* listening */
-    case 3:                           /* EMOJI_THINKING */
-        return EMOJI_ANIM_THINKING;   /* thinking */
-    case 4:                           /* EMOJI_PROCESSING */
-        return EMOJI_ANIM_PROCESSING; /* processing */
-    case 5:                           /* EMOJI_SPEAKING */
-        return EMOJI_ANIM_SPEAKING;   /* speaking */
-    case 6:                           /* EMOJI_ERROR */
-        return EMOJI_ANIM_ERROR;      /* error */
-    case 7:                           /* EMOJI_BLUETOOTH */
-        return EMOJI_ANIM_BLUETOOTH;  /* bluetooth */
-    case 8:                           /* EMOJI_CUSTOM_1 */
-        return EMOJI_ANIM_CUSTOM_1;   /* custom1 */
-    case 9:                           /* EMOJI_CUSTOM_2 */
-        return EMOJI_ANIM_CUSTOM_2;   /* custom2 */
-    case 10:                          /* EMOJI_CUSTOM_3 */
-        return EMOJI_ANIM_CUSTOM_3;   /* custom3 */
-    case 11:                          /* EMOJI_STANDBY_1 */
-        return EMOJI_ANIM_STANDBY_1;  /* standby1 */
-    case 12:                          /* EMOJI_STANDBY_2 */
-        return EMOJI_ANIM_STANDBY_2;  /* standby2 */
-    case 13:                          /* EMOJI_STANDBY_3 */
-        return EMOJI_ANIM_STANDBY_3;  /* standby3 */
-    case 14:                          /* EMOJI_STANDBY_4 */
-        return EMOJI_ANIM_STANDBY_4;  /* standby4 */
+    case 0:                              /* EMOJI_STANDBY */
+        return EMOJI_ANIM_STANDBY;       /* standby */
+    case 1:                              /* EMOJI_HAPPY */
+        return EMOJI_ANIM_HAPPY;         /* happy */
+    case 2:                              /* EMOJI_LISTENING */
+        return EMOJI_ANIM_LISTENING;     /* listening */
+    case 3:                              /* EMOJI_THINKING */
+        return EMOJI_ANIM_THINKING;      /* thinking */
+    case 4:                              /* EMOJI_PROCESSING */
+        return EMOJI_ANIM_PROCESSING;    /* processing */
+    case 5:                              /* EMOJI_SPEAKING */
+        return EMOJI_ANIM_SPEAKING;      /* speaking */
+    case 6:                              /* EMOJI_ERROR */
+        return EMOJI_ANIM_ERROR;         /* error */
+    case 7:                              /* EMOJI_BLUETOOTH */
+        return EMOJI_ANIM_BLUETOOTH;     /* bluetooth */
+    case 8:                              /* EMOJI_CUSTOM_1 */
+        return EMOJI_ANIM_CUSTOM_1;      /* custom1 */
+    case 9:                              /* EMOJI_CUSTOM_2 */
+        return EMOJI_ANIM_CUSTOM_2;      /* custom2 */
+    case 10:                             /* EMOJI_CUSTOM_3 */
+        return EMOJI_ANIM_CUSTOM_3;      /* custom3 */
+    case 11:                             /* EMOJI_STANDBY_1 */
+        return EMOJI_ANIM_STANDBY_1;     /* standby1 */
+    case 12:                             /* EMOJI_STANDBY_2 */
+        return EMOJI_ANIM_STANDBY_2;     /* standby2 */
+    case 13:                             /* EMOJI_STANDBY_3 */
+        return EMOJI_ANIM_STANDBY_3;     /* standby3 */
+    case 14:                             /* EMOJI_STANDBY_4 */
+        return EMOJI_ANIM_STANDBY_4;     /* standby4 */
+    case 15:                             /* EMOJI_DISCONNECT */
+        return EMOJI_ANIM_DISCONNECT;    /* disconnect */
+    case 16:                             /* EMOJI_SHOCK */
+        return EMOJI_ANIM_SHOCK;         /* shock */
+    case 17:                             /* EMOJI_SUNGLASSES */
+        return EMOJI_ANIM_SUNGLASSES;    /* sunglasses */
+    case 18:                             /* EMOJI_SAD */
+        return EMOJI_ANIM_SAD;           /* sad */
+    case 19:                             /* EMOJI_GET */
+        return EMOJI_ANIM_GET;           /* get */
+    case 20:                             /* EMOJI_SMILE */
+        return EMOJI_ANIM_SMILE;         /* smile */
+    case 21:                             /* EMOJI_RECHARGE */
+        return EMOJI_ANIM_RECHARGE;      /* recharge */
+    case 22:                             /* EMOJI_SPEECHLESS */
+        return EMOJI_ANIM_SPEECHLESS;    /* speechless */
+    case 23:                             /* EMOJI_CONCENTRATION */
+        return EMOJI_ANIM_CONCENTRATION; /* concentration */
+    case 24:                             /* EMOJI_FONDLE_LOVE */
+        return EMOJI_ANIM_FONDLE_LOVE;   /* fondle_love */
+    case 25:                             /* EMOJI_FONDLE_ANGER */
+        return EMOJI_ANIM_FONDLE_ANGER;  /* fondle_anger */
+    case 26:                             /* EMOJI_BLINK */
+        return EMOJI_ANIM_BLINK;         /* blink */
     default:
         return EMOJI_ANIM_STANDBY;
     }

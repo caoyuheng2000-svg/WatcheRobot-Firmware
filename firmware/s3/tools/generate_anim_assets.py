@@ -51,6 +51,18 @@ ANIM_TYPES = [
     "standby2",
     "standby3",
     "standby4",
+    "disconnect",
+    "shock",
+    "sunglasses",
+    "sad",
+    "get",
+    "smile",
+    "recharge",
+    "speechless",
+    "concentration",
+    "fondle_love",
+    "fondle_anger",
+    "blink",
 ]
 
 NAME_LEN = 24
@@ -82,6 +94,18 @@ LEGACY_IMPORT_MAP = {
     "watcher-standby2": "standby2",
     "watcher-standby3": "standby3",
     "watcher-standby4": "standby4",
+    "watcher-disconnect": "disconnect",
+    "watcher-shock": "shock",
+    "watcher-sunglasses": "sunglasses",
+    "watcher-sad": "sad",
+    "watcher-get": "get",
+    "watcher-smile": "smile",
+    "watcher-recharge": "recharge",
+    "watcher-speechless": "speechless",
+    "watcher-concentration": "concentration",
+    "watcher-fondle-love": "fondle_love",
+    "watcher-fondle-anger": "fondle_anger",
+    "watcher-blink": "blink",
 }
 
 GIF_CANDIDATES = {
@@ -101,6 +125,18 @@ GIF_CANDIDATES = {
     "standby2": ["standby2.gif", "watcher-standby2.gif"],
     "standby3": ["standby3.gif", "watcher-standby3.gif"],
     "standby4": ["standby4.gif", "watcher-standby4.gif"],
+    "disconnect": ["disconnect.gif", "watcher-disconnect.gif"],
+    "shock": ["shock.gif", "watcher-shock.gif"],
+    "sunglasses": ["sunglasses.gif", "watcher-sunglasses.gif"],
+    "sad": ["sad.gif", "watcher-sad.gif"],
+    "get": ["get.gif", "watcher-get.gif"],
+    "smile": ["smile.gif", "watcher-smile.gif"],
+    "recharge": ["recharge.gif", "watcher-recharge.gif"],
+    "speechless": ["speechless.gif", "watcher-speechless.gif"],
+    "concentration": ["concentration.gif", "watcher-concentration.gif"],
+    "fondle_love": ["fondle_love.gif", "watcher-fondle-love.gif", "watcher-fondle_love.gif"],
+    "fondle_anger": ["fondle_anger.gif", "watcher-fondle-anger.gif", "watcher-fondle_anger.gif"],
+    "blink": ["blink.gif", "watcher-blink.gif"],
 }
 
 

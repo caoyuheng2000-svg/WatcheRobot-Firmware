@@ -23,8 +23,10 @@ The branch has been brought to a hardware-validated baseline.
   `*.animpack` resolve correctly.
 - The current board-specific SDSPI path tolerates SD cards that reject
   `CMD59 CRC_ON_OFF` in SPI mode.
-- The current packaged release contains 16 generated animation types.
-- `custom1`, `custom2`, `custom3`, and `standby1` through `standby4` are included in the current generated asset set.
+- The current packaged release contains 28 generated animation types.
+- `custom1`, `custom2`, `custom3`, `standby1` through `standby4`, and the
+  extended WebSocket-callable expressions are included in the current generated
+  asset set.
 
 ## Runtime Layout
 

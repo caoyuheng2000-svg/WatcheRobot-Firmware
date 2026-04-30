@@ -5,8 +5,10 @@ This document remains the architecture baseline for the refactor.
 Current release note:
 
 - `V2.0.0` is the current packaged release baseline for this runtime architecture.
-- The current release bundle contains 16 generated animation types.
-- `custom1`, `custom2`, `custom3`, and `standby1` through `standby4` are present in the packaged GIF-derived asset set.
+- The current release bundle contains 28 generated animation types.
+- `custom1`, `custom2`, `custom3`, `standby1` through `standby4`, and the
+  extended WebSocket-callable expressions are present in the packaged
+  GIF-derived asset set.
 
 For the current validated branch state, day-to-day workflow, and next steps, see
 also:
