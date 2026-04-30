@@ -1,13 +1,15 @@
 #include "mem_monitor.h"
 
+#include <stdlib.h>
 #include <string.h>
 
-#include "sdkconfig.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
+#include "sdkconfig.h"
 
 #define TAG "MEM_MON"
 
@@ -16,10 +18,16 @@
 #define MEM_MONITOR_WARN_INTERNAL_FREE_BYTES ((size_t)CONFIG_WATCHER_MEM_MONITOR_WARN_INTERNAL_FREE_KB * 1024U)
 #define MEM_MONITOR_WARN_INTERNAL_LARGEST_BYTES ((size_t)CONFIG_WATCHER_MEM_MONITOR_WARN_INTERNAL_LARGEST_KB * 1024U)
 #define MEM_MONITOR_CRITICAL_INTERNAL_FREE_BYTES ((size_t)CONFIG_WATCHER_MEM_MONITOR_CRITICAL_INTERNAL_FREE_KB * 1024U)
-#define MEM_MONITOR_CRITICAL_INTERNAL_LARGEST_BYTES \
+#define MEM_MONITOR_CRITICAL_INTERNAL_LARGEST_BYTES                                                                    \
     ((size_t)CONFIG_WATCHER_MEM_MONITOR_CRITICAL_INTERNAL_LARGEST_KB * 1024U)
 #define MEM_MONITOR_WARN_DMA_LARGEST_BYTES ((size_t)CONFIG_WATCHER_MEM_MONITOR_WARN_DMA_LARGEST_KB * 1024U)
 #define MEM_MONITOR_CRITICAL_DMA_LARGEST_BYTES ((size_t)CONFIG_WATCHER_MEM_MONITOR_CRITICAL_DMA_LARGEST_KB * 1024U)
+#define MEM_MONITOR_TASK_PRIORITY 1
+#ifdef CONFIG_WATCHER_MEM_MONITOR_TASK_STACK_SIZE
+#define MEM_MONITOR_TASK_STACK_SIZE CONFIG_WATCHER_MEM_MONITOR_TASK_STACK_SIZE
+#else
+#define MEM_MONITOR_TASK_STACK_SIZE 2048
+#endif
 
 typedef enum {
     MEM_MONITOR_LEVEL_OK = 0,
@@ -41,6 +49,9 @@ typedef struct {
 
 static StaticSemaphore_t s_monitor_lock_buffer;
 static SemaphoreHandle_t s_monitor_lock = NULL;
+static StaticTask_t *s_monitor_task_tcb = NULL;
+static StackType_t *s_monitor_task_stack = NULL;
+static TaskHandle_t s_monitor_task = NULL;
 static mem_monitor_level_t s_last_level = MEM_MONITOR_LEVEL_OK;
 static int64_t s_last_alert_log_us = 0;
 static int64_t s_last_integrity_check_us = 0;
@@ -157,11 +168,8 @@ warn:
     return MEM_MONITOR_LEVEL_WARN;
 }
 
-static void mem_monitor_log_snapshot(const char *stage,
-                                     const mem_monitor_snapshot_t *snapshot,
-                                     mem_monitor_level_t level,
-                                     const char *reason,
-                                     bool recovery) {
+static void mem_monitor_log_snapshot(const char *stage, const mem_monitor_snapshot_t *snapshot,
+                                     mem_monitor_level_t level, const char *reason, bool recovery) {
     const char *safe_stage = (stage != NULL && stage[0] != '\0') ? stage : "periodic";
     const char *safe_reason = (reason != NULL && reason[0] != '\0') ? reason : "none";
 
@@ -171,112 +179,93 @@ static void mem_monitor_log_snapshot(const char *stage,
     }
 
     if (recovery) {
-        ESP_LOGI(TAG,
-                 "[%s] recovered: int=%u/%uKB(min=%uKB) dma=%u/%uKB(min=%uKB) 8bit=%u/%uKB(min=%uKB)"
+        ESP_LOGI(
+            TAG,
+            "[%s] recovered: int=%u/%uKB(min=%uKB) dma=%u/%uKB(min=%uKB) 8bit=%u/%uKB(min=%uKB)"
 #if CONFIG_SPIRAM
-                 " psram=%u/%uKB(min=%uKB)"
+            " psram=%u/%uKB(min=%uKB)"
 #endif
-                 ,
-                 safe_stage,
-                 mem_monitor_bytes_to_kb(snapshot->internal.total_free_bytes),
-                 mem_monitor_bytes_to_kb(snapshot->internal.largest_free_block),
-                 mem_monitor_bytes_to_kb(snapshot->min_internal),
-                 mem_monitor_bytes_to_kb(snapshot->dma.total_free_bytes),
-                 mem_monitor_bytes_to_kb(snapshot->dma.largest_free_block),
-                 mem_monitor_bytes_to_kb(snapshot->min_dma),
-                 mem_monitor_bytes_to_kb(snapshot->heap_8bit.total_free_bytes),
-                 mem_monitor_bytes_to_kb(snapshot->heap_8bit.largest_free_block),
-                 mem_monitor_bytes_to_kb(snapshot->min_8bit)
+            ,
+            safe_stage, mem_monitor_bytes_to_kb(snapshot->internal.total_free_bytes),
+            mem_monitor_bytes_to_kb(snapshot->internal.largest_free_block),
+            mem_monitor_bytes_to_kb(snapshot->min_internal), mem_monitor_bytes_to_kb(snapshot->dma.total_free_bytes),
+            mem_monitor_bytes_to_kb(snapshot->dma.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_dma),
+            mem_monitor_bytes_to_kb(snapshot->heap_8bit.total_free_bytes),
+            mem_monitor_bytes_to_kb(snapshot->heap_8bit.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_8bit)
 #if CONFIG_SPIRAM
-                 ,
-                 mem_monitor_bytes_to_kb(snapshot->spiram.total_free_bytes),
-                 mem_monitor_bytes_to_kb(snapshot->spiram.largest_free_block),
-                 mem_monitor_bytes_to_kb(snapshot->min_spiram)
+                                                                                 ,
+            mem_monitor_bytes_to_kb(snapshot->spiram.total_free_bytes),
+            mem_monitor_bytes_to_kb(snapshot->spiram.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_spiram)
 #endif
         );
         return;
     }
 
     if (level == MEM_MONITOR_LEVEL_CRITICAL) {
-        ESP_LOGE(TAG,
-                 "[%s] pressure=%s(%s): int=%u/%uKB(min=%uKB) dma=%u/%uKB(min=%uKB) 8bit=%u/%uKB(min=%uKB)"
+        ESP_LOGE(
+            TAG,
+            "[%s] pressure=%s(%s): int=%u/%uKB(min=%uKB) dma=%u/%uKB(min=%uKB) 8bit=%u/%uKB(min=%uKB)"
 #if CONFIG_SPIRAM
-                 " psram=%u/%uKB(min=%uKB)"
+            " psram=%u/%uKB(min=%uKB)"
 #endif
-                 ,
-                 safe_stage,
-                 mem_monitor_level_to_string(level),
-                 safe_reason,
-                 mem_monitor_bytes_to_kb(snapshot->internal.total_free_bytes),
-                 mem_monitor_bytes_to_kb(snapshot->internal.largest_free_block),
-                 mem_monitor_bytes_to_kb(snapshot->min_internal),
-                 mem_monitor_bytes_to_kb(snapshot->dma.total_free_bytes),
-                 mem_monitor_bytes_to_kb(snapshot->dma.largest_free_block),
-                 mem_monitor_bytes_to_kb(snapshot->min_dma),
-                 mem_monitor_bytes_to_kb(snapshot->heap_8bit.total_free_bytes),
-                 mem_monitor_bytes_to_kb(snapshot->heap_8bit.largest_free_block),
-                 mem_monitor_bytes_to_kb(snapshot->min_8bit)
+            ,
+            safe_stage, mem_monitor_level_to_string(level), safe_reason,
+            mem_monitor_bytes_to_kb(snapshot->internal.total_free_bytes),
+            mem_monitor_bytes_to_kb(snapshot->internal.largest_free_block),
+            mem_monitor_bytes_to_kb(snapshot->min_internal), mem_monitor_bytes_to_kb(snapshot->dma.total_free_bytes),
+            mem_monitor_bytes_to_kb(snapshot->dma.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_dma),
+            mem_monitor_bytes_to_kb(snapshot->heap_8bit.total_free_bytes),
+            mem_monitor_bytes_to_kb(snapshot->heap_8bit.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_8bit)
 #if CONFIG_SPIRAM
-                 ,
-                 mem_monitor_bytes_to_kb(snapshot->spiram.total_free_bytes),
-                 mem_monitor_bytes_to_kb(snapshot->spiram.largest_free_block),
-                 mem_monitor_bytes_to_kb(snapshot->min_spiram)
+                                                                                 ,
+            mem_monitor_bytes_to_kb(snapshot->spiram.total_free_bytes),
+            mem_monitor_bytes_to_kb(snapshot->spiram.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_spiram)
 #endif
         );
         return;
     }
 
     if (level == MEM_MONITOR_LEVEL_WARN) {
-        ESP_LOGW(TAG,
-                 "[%s] pressure=%s(%s): int=%u/%uKB(min=%uKB) dma=%u/%uKB(min=%uKB) 8bit=%u/%uKB(min=%uKB)"
+        ESP_LOGW(
+            TAG,
+            "[%s] pressure=%s(%s): int=%u/%uKB(min=%uKB) dma=%u/%uKB(min=%uKB) 8bit=%u/%uKB(min=%uKB)"
 #if CONFIG_SPIRAM
-                 " psram=%u/%uKB(min=%uKB)"
+            " psram=%u/%uKB(min=%uKB)"
 #endif
-                 ,
-                 safe_stage,
-                 mem_monitor_level_to_string(level),
-                 safe_reason,
-                 mem_monitor_bytes_to_kb(snapshot->internal.total_free_bytes),
-                 mem_monitor_bytes_to_kb(snapshot->internal.largest_free_block),
-                 mem_monitor_bytes_to_kb(snapshot->min_internal),
-                 mem_monitor_bytes_to_kb(snapshot->dma.total_free_bytes),
-                 mem_monitor_bytes_to_kb(snapshot->dma.largest_free_block),
-                 mem_monitor_bytes_to_kb(snapshot->min_dma),
-                 mem_monitor_bytes_to_kb(snapshot->heap_8bit.total_free_bytes),
-                 mem_monitor_bytes_to_kb(snapshot->heap_8bit.largest_free_block),
-                 mem_monitor_bytes_to_kb(snapshot->min_8bit)
+            ,
+            safe_stage, mem_monitor_level_to_string(level), safe_reason,
+            mem_monitor_bytes_to_kb(snapshot->internal.total_free_bytes),
+            mem_monitor_bytes_to_kb(snapshot->internal.largest_free_block),
+            mem_monitor_bytes_to_kb(snapshot->min_internal), mem_monitor_bytes_to_kb(snapshot->dma.total_free_bytes),
+            mem_monitor_bytes_to_kb(snapshot->dma.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_dma),
+            mem_monitor_bytes_to_kb(snapshot->heap_8bit.total_free_bytes),
+            mem_monitor_bytes_to_kb(snapshot->heap_8bit.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_8bit)
 #if CONFIG_SPIRAM
-                 ,
-                 mem_monitor_bytes_to_kb(snapshot->spiram.total_free_bytes),
-                 mem_monitor_bytes_to_kb(snapshot->spiram.largest_free_block),
-                 mem_monitor_bytes_to_kb(snapshot->min_spiram)
+                                                                                 ,
+            mem_monitor_bytes_to_kb(snapshot->spiram.total_free_bytes),
+            mem_monitor_bytes_to_kb(snapshot->spiram.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_spiram)
 #endif
         );
         return;
     }
 
-    ESP_LOGI(TAG,
-             "[%s] pressure=%s: int=%u/%uKB(min=%uKB) dma=%u/%uKB(min=%uKB) 8bit=%u/%uKB(min=%uKB)"
+    ESP_LOGI(
+        TAG,
+        "[%s] pressure=%s: int=%u/%uKB(min=%uKB) dma=%u/%uKB(min=%uKB) 8bit=%u/%uKB(min=%uKB)"
 #if CONFIG_SPIRAM
-             " psram=%u/%uKB(min=%uKB)"
+        " psram=%u/%uKB(min=%uKB)"
 #endif
-             ,
-             safe_stage,
-             mem_monitor_level_to_string(level),
-             mem_monitor_bytes_to_kb(snapshot->internal.total_free_bytes),
-             mem_monitor_bytes_to_kb(snapshot->internal.largest_free_block),
-             mem_monitor_bytes_to_kb(snapshot->min_internal),
-             mem_monitor_bytes_to_kb(snapshot->dma.total_free_bytes),
-             mem_monitor_bytes_to_kb(snapshot->dma.largest_free_block),
-             mem_monitor_bytes_to_kb(snapshot->min_dma),
-             mem_monitor_bytes_to_kb(snapshot->heap_8bit.total_free_bytes),
-             mem_monitor_bytes_to_kb(snapshot->heap_8bit.largest_free_block),
-             mem_monitor_bytes_to_kb(snapshot->min_8bit)
+        ,
+        safe_stage, mem_monitor_level_to_string(level), mem_monitor_bytes_to_kb(snapshot->internal.total_free_bytes),
+        mem_monitor_bytes_to_kb(snapshot->internal.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_internal),
+        mem_monitor_bytes_to_kb(snapshot->dma.total_free_bytes),
+        mem_monitor_bytes_to_kb(snapshot->dma.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_dma),
+        mem_monitor_bytes_to_kb(snapshot->heap_8bit.total_free_bytes),
+        mem_monitor_bytes_to_kb(snapshot->heap_8bit.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_8bit)
 #if CONFIG_SPIRAM
-             ,
-             mem_monitor_bytes_to_kb(snapshot->spiram.total_free_bytes),
-             mem_monitor_bytes_to_kb(snapshot->spiram.largest_free_block),
-             mem_monitor_bytes_to_kb(snapshot->min_spiram)
+                                                                             ,
+        mem_monitor_bytes_to_kb(snapshot->spiram.total_free_bytes),
+        mem_monitor_bytes_to_kb(snapshot->spiram.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_spiram)
 #endif
     );
 }
@@ -339,9 +328,53 @@ static void mem_monitor_sample(const char *stage, bool force_log) {
     mem_monitor_lock_give();
 }
 
+static void mem_monitor_task(void *arg) {
+    (void)arg;
+
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_WATCHER_MEM_MONITOR_PERIOD_MS));
+        mem_monitor_sample("periodic", false);
+    }
+}
+
 void mem_monitor_init(void) {
     if (s_monitor_lock == NULL) {
         s_monitor_lock = xSemaphoreCreateMutexStatic(&s_monitor_lock_buffer);
+    }
+
+    if (s_monitor_task != NULL) {
+        return;
+    }
+
+    s_monitor_task_tcb =
+        (StaticTask_t *)heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (s_monitor_task_tcb == NULL) {
+        ESP_LOGW(TAG, "memory monitor task TCB allocation failed");
+        return;
+    }
+
+#if CONFIG_SPIRAM
+    s_monitor_task_stack = (StackType_t *)heap_caps_calloc(1, (size_t)MEM_MONITOR_TASK_STACK_SIZE * sizeof(StackType_t),
+                                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+    s_monitor_task_stack = (StackType_t *)heap_caps_calloc(1, (size_t)MEM_MONITOR_TASK_STACK_SIZE * sizeof(StackType_t),
+                                                           MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+#endif
+    if (s_monitor_task_stack == NULL) {
+        ESP_LOGW(TAG, "memory monitor task stack allocation failed");
+        free(s_monitor_task_tcb);
+        s_monitor_task_tcb = NULL;
+        return;
+    }
+
+    s_monitor_task = xTaskCreateStatic(mem_monitor_task, "mem_monitor", MEM_MONITOR_TASK_STACK_SIZE, NULL,
+                                       MEM_MONITOR_TASK_PRIORITY, s_monitor_task_stack, s_monitor_task_tcb);
+    if (s_monitor_task == NULL) {
+        ESP_LOGW(TAG, "memory monitor task create failed");
+        free(s_monitor_task_stack);
+        free(s_monitor_task_tcb);
+        s_monitor_task_stack = NULL;
+        s_monitor_task_tcb = NULL;
     }
 }
 
@@ -369,8 +402,7 @@ bool mem_monitor_check_integrity(const char *stage) {
 
 #else
 
-void mem_monitor_init(void) {
-}
+void mem_monitor_init(void) {}
 
 void mem_monitor_snapshot(const char *stage) {
     (void)stage;

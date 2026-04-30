@@ -72,6 +72,15 @@ menu "Watcher Memory Monitor"
         help
             How often the background monitor samples heap state for warnings.
 
+    config WATCHER_MEM_MONITOR_TASK_STACK_SIZE
+        int "Memory monitor task stack size"
+        range 1536 4096
+        default 2048
+        help
+            Stack size for the low-priority memory monitor task. The task only
+            samples heap counters and is allocated with an external stack when
+            PSRAM is enabled.
+
     config WATCHER_MEM_MONITOR_ALERT_REPEAT_MS
         int "Low-memory alert repeat period (ms)"
         range 1000 3600000

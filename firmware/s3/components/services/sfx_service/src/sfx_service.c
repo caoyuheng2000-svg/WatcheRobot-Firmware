@@ -7,6 +7,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "hal_audio.h"
+#include "sdkconfig.h"
 #include "sensecap-watcher.h"
 
 #include <stdio.h>
@@ -19,10 +20,18 @@ void mem_monitor_snapshot(const char *stage);
 
 #define SFX_MANIFEST_PATH "/spiffs/sfx/manifest.json"
 #define SFX_DIR "/spiffs/sfx"
-#define SFX_TASK_STACK 8192
+#ifdef CONFIG_WATCHER_SFX_TASK_STACK_SIZE
+#define SFX_TASK_STACK CONFIG_WATCHER_SFX_TASK_STACK_SIZE
+#else
+#define SFX_TASK_STACK 4096
+#endif
 #define SFX_TASK_PRIORITY 5
 #define SFX_POLL_INTERVAL_MS 20
-#define SFX_STREAM_CHUNK_SIZE 4096
+#ifdef CONFIG_WATCHER_SFX_STREAM_CHUNK_SIZE
+#define SFX_STREAM_CHUNK_SIZE CONFIG_WATCHER_SFX_STREAM_CHUNK_SIZE
+#else
+#define SFX_STREAM_CHUNK_SIZE 2048
+#endif
 #define SFX_PREFETCH_LIMIT_BYTES (192 * 1024)
 #define SFX_MAX_ID_LEN 32
 #define SFX_MAX_PATH_LEN 128

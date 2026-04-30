@@ -7,6 +7,7 @@
 #include "esp_lvgl_port.h"
 #include "esp_check.h"
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_log.h"
@@ -17,6 +18,9 @@
 #include "freertos/task.h"
 
 #include "lvgl.h"
+
+#include <stdlib.h>
+#include <string.h>
 
 #ifdef ESP_LVGL_PORT_TOUCH_COMPONENT
 #include "esp_lcd_touch.h"
@@ -77,6 +81,12 @@ typedef struct {
 typedef struct lvgl_port_ctx_s {
     SemaphoreHandle_t lvgl_mux;
     esp_timer_handle_t tick_timer;
+    TaskHandle_t task_handle;
+#if CONFIG_LVGL_PORT_TASK_STACK_ALLOC_EXTERNAL
+    StaticTask_t *task_tcb;
+    StackType_t *task_stack;
+    size_t task_stack_words;
+#endif
     bool running;
     int task_max_sleep_ms;
 #ifdef ESP_LVGL_PORT_USB_HOST_HID_COMPONENT
@@ -139,6 +149,7 @@ static int lvgl_port_timer_period_ms = 5;
 *******************************************************************************/
 static void lvgl_port_task(void *arg);
 static esp_err_t lvgl_port_tick_init(void);
+static esp_err_t lvgl_port_task_create(const lvgl_port_cfg_t *cfg);
 static void lvgl_port_task_deinit(void);
 
 // LVGL callbacks
@@ -177,11 +188,22 @@ static void lvgl_port_pix_monochrome_callback(lv_disp_drv_t *drv, uint8_t *buf, 
 
 esp_err_t lvgl_port_init(const lvgl_port_cfg_t *cfg) {
     esp_err_t ret = ESP_OK;
+#if CONFIG_LVGL_PORT_TASK_STACK_ALLOC_EXTERNAL
+    StaticTask_t *task_tcb = lvgl_port_ctx.task_tcb;
+    StackType_t *task_stack = lvgl_port_ctx.task_stack;
+    size_t task_stack_words = lvgl_port_ctx.task_stack_words;
+#endif
+
     ESP_GOTO_ON_FALSE(cfg, ESP_ERR_INVALID_ARG, err, TAG, "invalid argument");
     ESP_GOTO_ON_FALSE(cfg->task_affinity < (configNUM_CORES), ESP_ERR_INVALID_ARG, err, TAG,
                       "Bad core number for task! Maximum core number is %d", (configNUM_CORES - 1));
 
     memset(&lvgl_port_ctx, 0, sizeof(lvgl_port_ctx));
+#if CONFIG_LVGL_PORT_TASK_STACK_ALLOC_EXTERNAL
+    lvgl_port_ctx.task_tcb = task_tcb;
+    lvgl_port_ctx.task_stack = task_stack;
+    lvgl_port_ctx.task_stack_words = task_stack_words;
+#endif
 
     /* LVGL init */
     lv_init();
@@ -196,14 +218,7 @@ esp_err_t lvgl_port_init(const lvgl_port_cfg_t *cfg) {
     lvgl_port_ctx.lvgl_mux = xSemaphoreCreateRecursiveMutex();
     ESP_GOTO_ON_FALSE(lvgl_port_ctx.lvgl_mux, ESP_ERR_NO_MEM, err, TAG, "Create LVGL mutex fail!");
 
-    BaseType_t res;
-    if (cfg->task_affinity < 0) {
-        res = xTaskCreate(lvgl_port_task, "LVGL task", cfg->task_stack, NULL, cfg->task_priority, NULL);
-    } else {
-        res = xTaskCreatePinnedToCore(lvgl_port_task, "LVGL task", cfg->task_stack, NULL, cfg->task_priority, NULL,
-                                      cfg->task_affinity);
-    }
-    ESP_GOTO_ON_FALSE(res == pdPASS, ESP_FAIL, err, TAG, "Create LVGL task fail!");
+    ESP_GOTO_ON_ERROR(lvgl_port_task_create(cfg), err, TAG, "Create LVGL task fail!");
 
 err:
     if (ret != ESP_OK) {
@@ -736,11 +751,90 @@ static void lvgl_port_task(void *arg) {
     vTaskDelete(NULL);
 }
 
+static esp_err_t lvgl_port_task_create(const lvgl_port_cfg_t *cfg) {
+    ESP_RETURN_ON_FALSE(cfg != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid LVGL task config");
+
+#if CONFIG_LVGL_PORT_TASK_STACK_ALLOC_EXTERNAL
+    if (lvgl_port_ctx.task_tcb == NULL) {
+        lvgl_port_ctx.task_tcb =
+            (StaticTask_t *)heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    } else {
+        memset(lvgl_port_ctx.task_tcb, 0, sizeof(StaticTask_t));
+    }
+    ESP_RETURN_ON_FALSE(lvgl_port_ctx.task_tcb != NULL, ESP_ERR_NO_MEM, TAG, "alloc LVGL task TCB failed");
+
+    if (lvgl_port_ctx.task_stack != NULL && lvgl_port_ctx.task_stack_words < (size_t)cfg->task_stack) {
+        free(lvgl_port_ctx.task_stack);
+        lvgl_port_ctx.task_stack = NULL;
+        lvgl_port_ctx.task_stack_words = 0;
+    }
+    if (lvgl_port_ctx.task_stack == NULL) {
+        lvgl_port_ctx.task_stack = (StackType_t *)heap_caps_calloc(1, (size_t)cfg->task_stack * sizeof(StackType_t),
+                                                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (lvgl_port_ctx.task_stack != NULL) {
+            lvgl_port_ctx.task_stack_words = (size_t)cfg->task_stack;
+        }
+    } else {
+        memset(lvgl_port_ctx.task_stack, 0, (size_t)cfg->task_stack * sizeof(StackType_t));
+    }
+    if (lvgl_port_ctx.task_stack == NULL) {
+        free(lvgl_port_ctx.task_tcb);
+        lvgl_port_ctx.task_tcb = NULL;
+        lvgl_port_ctx.task_stack_words = 0;
+        ESP_LOGE(TAG, "alloc LVGL task stack in PSRAM failed, size=%d", cfg->task_stack);
+        return ESP_ERR_NO_MEM;
+    }
+
+    if (cfg->task_affinity < 0) {
+        lvgl_port_ctx.task_handle =
+            xTaskCreateStatic(lvgl_port_task, "LVGL task", cfg->task_stack, NULL, cfg->task_priority,
+                              lvgl_port_ctx.task_stack, lvgl_port_ctx.task_tcb);
+    } else {
+        lvgl_port_ctx.task_handle =
+            xTaskCreateStaticPinnedToCore(lvgl_port_task, "LVGL task", cfg->task_stack, NULL, cfg->task_priority,
+                                          lvgl_port_ctx.task_stack, lvgl_port_ctx.task_tcb, cfg->task_affinity);
+    }
+
+    if (lvgl_port_ctx.task_handle == NULL) {
+        free(lvgl_port_ctx.task_stack);
+        free(lvgl_port_ctx.task_tcb);
+        lvgl_port_ctx.task_stack = NULL;
+        lvgl_port_ctx.task_tcb = NULL;
+        lvgl_port_ctx.task_stack_words = 0;
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "LVGL task stack allocated in PSRAM, size=%d", cfg->task_stack);
+    return ESP_OK;
+#else
+    BaseType_t res;
+
+    if (cfg->task_affinity < 0) {
+        res = xTaskCreate(lvgl_port_task, "LVGL task", cfg->task_stack, NULL, cfg->task_priority,
+                          &lvgl_port_ctx.task_handle);
+    } else {
+        res = xTaskCreatePinnedToCore(lvgl_port_task, "LVGL task", cfg->task_stack, NULL, cfg->task_priority,
+                                      &lvgl_port_ctx.task_handle, cfg->task_affinity);
+    }
+    return res == pdPASS ? ESP_OK : ESP_FAIL;
+#endif
+}
+
 static void lvgl_port_task_deinit(void) {
+#if CONFIG_LVGL_PORT_TASK_STACK_ALLOC_EXTERNAL
+    StaticTask_t *task_tcb = lvgl_port_ctx.task_tcb;
+    StackType_t *task_stack = lvgl_port_ctx.task_stack;
+    size_t task_stack_words = lvgl_port_ctx.task_stack_words;
+#endif
     if (lvgl_port_ctx.lvgl_mux) {
         vSemaphoreDelete(lvgl_port_ctx.lvgl_mux);
     }
     memset(&lvgl_port_ctx, 0, sizeof(lvgl_port_ctx));
+#if CONFIG_LVGL_PORT_TASK_STACK_ALLOC_EXTERNAL
+    lvgl_port_ctx.task_tcb = task_tcb;
+    lvgl_port_ctx.task_stack = task_stack;
+    lvgl_port_ctx.task_stack_words = task_stack_words;
+#endif
 #if LV_ENABLE_GC || !LV_MEM_CUSTOM
     /* Deinitialize LVGL */
     lv_deinit();
@@ -767,8 +861,8 @@ static void lvgl_port_flush_callback(lv_disp_drv_t *drv, const lv_area_t *area, 
     const int offsety1 = area->y1;
     const int offsety2 = area->y2;
     // copy a buffer's content to a specific area of the display
-    esp_err_t ret = esp_lcd_panel_draw_bitmap(disp_ctx->panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1,
-                                              color_map);
+    esp_err_t ret =
+        esp_lcd_panel_draw_bitmap(disp_ctx->panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, color_map);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Panel flush failed: %s", esp_err_to_name(ret));
         lv_disp_flush_ready(drv);
@@ -856,8 +950,7 @@ static void lvgl_port_touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *
         if (touch_ctx->consecutive_failures >= LVGL_TOUCH_READ_FAIL_BACKOFF_THRESHOLD) {
             touch_ctx->consecutive_failures = 0;
             touch_ctx->suppress_until = now + pdMS_TO_TICKS(LVGL_TOUCH_READ_FAIL_BACKOFF_MS);
-            ESP_LOGW(TAG,
-                     "Touch read failed repeatedly, backing off polling for %d ms",
+            ESP_LOGW(TAG, "Touch read failed repeatedly, backing off polling for %d ms",
                      LVGL_TOUCH_READ_FAIL_BACKOFF_MS);
         }
         data->state = LV_INDEV_STATE_RELEASED;

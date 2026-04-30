@@ -4,14 +4,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "sdkconfig.h"
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "mbedtls/base64.h"
+#include "sdkconfig.h"
 #include "sensecap-watcher.h"
 #include "sscma_client.h"
 
@@ -362,32 +363,25 @@ static esp_err_t hal_camera_log_device_info(void) {
 
     ret = sscma_client_get_info(s_ctx.client, &info, false);
     if (ret == ESP_OK && info != NULL) {
-        ESP_LOGI(TAG, "HX6538 id=%s name=%s hw=%s fw=%s at=%s",
-                 info->id ? info->id : "<null>",
-                 info->name ? info->name : "<null>",
-                 info->hw_ver ? info->hw_ver : "<null>",
-                 info->fw_ver ? info->fw_ver : "<null>",
-                 info->sw_ver ? info->sw_ver : "<null>");
+        ESP_LOGI(TAG, "HX6538 id=%s name=%s hw=%s fw=%s at=%s", info->id ? info->id : "<null>",
+                 info->name ? info->name : "<null>", info->hw_ver ? info->hw_ver : "<null>",
+                 info->fw_ver ? info->fw_ver : "<null>", info->sw_ver ? info->sw_ver : "<null>");
     } else {
         ESP_LOGW(TAG, "sscma_client_get_info failed: %s", esp_err_to_name(ret));
     }
 
     ret = sscma_client_get_model(s_ctx.client, &model, false);
     if (ret == ESP_OK && model != NULL) {
-        ESP_LOGI(TAG, "HX6538 model id=%d uuid=%s name=%s ver=%s",
-                 model->id,
-                 model->uuid ? model->uuid : "<null>",
-                 model->name ? model->name : "<null>",
-                 model->ver ? model->ver : "<null>");
+        ESP_LOGI(TAG, "HX6538 model id=%d uuid=%s name=%s ver=%s", model->id, model->uuid ? model->uuid : "<null>",
+                 model->name ? model->name : "<null>", model->ver ? model->ver : "<null>");
     } else {
         ESP_LOGW(TAG, "sscma_client_get_model failed: %s", esp_err_to_name(ret));
     }
 
     ret = sscma_client_get_sensor(s_ctx.client, &sensor);
     if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "HX6538 sensor id=%d type=%d state=%d opt_id=%d detail=%s",
-                 sensor.id, sensor.type, sensor.state, sensor.opt_id,
-                 sensor.opt_detail ? sensor.opt_detail : "<null>");
+        ESP_LOGI(TAG, "HX6538 sensor id=%d type=%d state=%d opt_id=%d detail=%s", sensor.id, sensor.type, sensor.state,
+                 sensor.opt_id, sensor.opt_detail ? sensor.opt_detail : "<null>");
         if (xSemaphoreTake(s_ctx.lock, portMAX_DELAY) == pdTRUE) {
             hal_camera_update_sensor_state_locked(sensor.id, sensor.opt_id, 0);
             xSemaphoreGive(s_ctx.lock);
@@ -446,7 +440,10 @@ static esp_err_t hal_camera_decode_image(const char *image, uint8_t **jpeg, size
     ESP_RETURN_ON_FALSE(payload != NULL && payload_len > 0, ESP_ERR_INVALID_ARG, TAG, "image payload empty");
 
     max_output = ((payload_len + 3) / 4) * 3 + 4;
-    buffer = (uint8_t *)malloc(max_output);
+    buffer = (uint8_t *)heap_caps_malloc(max_output, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (buffer == NULL) {
+        buffer = (uint8_t *)heap_caps_malloc(max_output, MALLOC_CAP_8BIT);
+    }
     ESP_RETURN_ON_FALSE(buffer != NULL, ESP_ERR_NO_MEM, TAG, "alloc jpeg buffer failed");
 
     ret = mbedtls_base64_decode(buffer, max_output, &decoded_len, (const unsigned char *)payload, payload_len);
@@ -684,21 +681,14 @@ static void hal_camera_stream_task(void *arg) {
                          "stream frames ok=%lu err=%lu fps=%d last_jpeg=%u timing_us latest{capture=%lu invoke=%lu "
                          "wait=%lu decode=%lu callback=%lu loop=%lu} avg{capture=%lu invoke=%lu wait=%lu decode=%lu "
                          "callback=%lu loop=%lu}",
-                         (unsigned long)ok_count,
-                         (unsigned long)s_ctx.stream_frames_err,
-                         fps,
-                         (unsigned int)jpeg_size,
-                         (unsigned long)sample.capture_total_us,
-                         (unsigned long)sample.invoke_call_us,
-                         (unsigned long)sample.wait_image_us,
-                         (unsigned long)sample.decode_us,
-                         (unsigned long)sample.callback_us,
-                         (unsigned long)sample.loop_total_us,
+                         (unsigned long)ok_count, (unsigned long)s_ctx.stream_frames_err, fps, (unsigned int)jpeg_size,
+                         (unsigned long)sample.capture_total_us, (unsigned long)sample.invoke_call_us,
+                         (unsigned long)sample.wait_image_us, (unsigned long)sample.decode_us,
+                         (unsigned long)sample.callback_us, (unsigned long)sample.loop_total_us,
                          (unsigned long)(capture_total_acc_us / timing_count),
                          (unsigned long)(invoke_call_acc_us / timing_count),
                          (unsigned long)(wait_image_acc_us / timing_count),
-                         (unsigned long)(decode_acc_us / timing_count),
-                         (unsigned long)(callback_acc_us / timing_count),
+                         (unsigned long)(decode_acc_us / timing_count), (unsigned long)(callback_acc_us / timing_count),
                          (unsigned long)(loop_total_acc_us / timing_count));
             }
         } else {
@@ -834,8 +824,9 @@ esp_err_t hal_camera_init(void) {
             xSemaphoreGive(s_ctx.lock);
         }
 
-        ret = xSemaphoreTake(s_ctx.connect_sem, pdMS_TO_TICKS(HAL_CAMERA_CONNECT_TIMEOUT_MS)) == pdTRUE ? ESP_OK
-                                                                                                         : ESP_ERR_TIMEOUT;
+        ret = xSemaphoreTake(s_ctx.connect_sem, pdMS_TO_TICKS(HAL_CAMERA_CONNECT_TIMEOUT_MS)) == pdTRUE
+                  ? ESP_OK
+                  : ESP_ERR_TIMEOUT;
         if (ret != ESP_OK) {
             if (xSemaphoreTake(s_ctx.lock, portMAX_DELAY) == pdTRUE) {
                 s_ctx.init_in_progress = false;
@@ -912,11 +903,8 @@ esp_err_t hal_camera_configure(int width, int height, int quality, int *applied_
     }
 
     (void)hal_camera_refresh_sensor_catalog(HAL_CAMERA_VERBOSE_LOGS_ENABLED != 0);
-    ESP_LOGI(TAG, "camera sensor profile applied: sensor=%d opt_id=%d detail=%s quality_hint=%d",
-             sensor_id,
-             option->opt_id,
-             option->detail,
-             current_quality);
+    ESP_LOGI(TAG, "camera sensor profile applied: sensor=%d opt_id=%d detail=%s quality_hint=%d", sensor_id,
+             option->opt_id, option->detail, current_quality);
 
     if (applied_width != NULL) {
         *applied_width = option->width;
@@ -926,7 +914,8 @@ esp_err_t hal_camera_configure(int width, int height, int quality, int *applied_
     }
 
     if (quality > 0) {
-        ESP_LOGI(TAG, "camera quality hint stored=%d (current SSCMA path does not expose writable JPEG quality)", quality);
+        ESP_LOGI(TAG, "camera quality hint stored=%d (current SSCMA path does not expose writable JPEG quality)",
+                 quality);
     }
 
     return ESP_OK;
