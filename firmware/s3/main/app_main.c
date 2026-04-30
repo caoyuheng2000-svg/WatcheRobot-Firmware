@@ -30,6 +30,7 @@
 #include "mem_monitor.h"
 #include "ota_service.h"
 #include "sensecap-watcher.h"
+#include "sfx_service.h"
 #include "stress_mode.h"
 #include "voice_service.h"
 #include "wifi_manager.h"
@@ -52,6 +53,12 @@
 #define STM32_POWER_OFF_SETTLE_MS 300
 #define STARTUP_BEHAVIOR_POLL_MS 50
 #define STARTUP_BEHAVIOR_TIMEOUT_MS 10000
+#define READY_IDLE_VARIANT_COUNT 4
+#define READY_IDLE_ROUNDS_BEFORE_SLEEP 5
+#define READY_IDLE_MIN_VARIANT_DURATION_MS 1000
+#define READY_IDLE_FALLBACK_RETRY_MS 10000
+#define READY_IDLE_POST_HAPPY_MIN_DELAY_MS 1200
+#define READY_IDLE_STANDBY_HANDOFF_TIMEOUT_MS 1000
 #define CLOUD_DISCOVERY_TIMEOUT_MS 5000
 #define CLOUD_RETRY_DELAY_MS 2000
 #define CLOUD_PROTOCOL_RETRY_DELAY_MS 5000
@@ -140,6 +147,17 @@ static int64_t s_cached_ws_connect_started_us = 0;
 static int64_t s_wifi_recovery_started_us = 0;
 static QueueHandle_t s_discovery_result_queue = NULL;
 static char s_cached_ws_url[CACHED_WS_URL_MAX_LEN] = {0};
+static int s_ready_idle_variant_index = -1;
+static int64_t s_ready_idle_next_switch_us = 0;
+static uint32_t s_ready_idle_completed_rounds = 0;
+static bool s_ready_idle_sleeping = false;
+static int64_t s_ready_idle_after_happy_us = 0;
+static int64_t s_ready_idle_happy_observed_us = 0;
+static bool s_ready_idle_happy_defer_logged = false;
+static bool s_ready_idle_variant_unavailable_logged[READY_IDLE_VARIANT_COUNT] = {0};
+static bool s_ready_idle_all_unavailable_logged = false;
+static bool s_ready_idle_standby_transition_pending = false;
+static int64_t s_ready_idle_standby_transition_deadline_us = 0;
 static bool s_mcu_obs_state_initialized = false;
 static mcu_link_state_t s_last_mcu_obs_state = MCU_LINK_STATE_DOWN;
 static bool s_mcu_obs_stats_initialized = false;
@@ -257,6 +275,40 @@ static const char *transport_state_to_string(transport_state_t state) {
     }
 }
 
+static int ready_idle_post_happy_delay_ms(void) {
+    int duration_ms = emoji_get_loop_duration_ms(EMOJI_ANIM_HAPPY);
+    if (duration_ms < READY_IDLE_POST_HAPPY_MIN_DELAY_MS) {
+        duration_ms = READY_IDLE_POST_HAPPY_MIN_DELAY_MS;
+    }
+    return duration_ms;
+}
+
+static void update_ready_idle_handoff_deadline(transport_state_t state) {
+    if (state == TRANSPORT_BLE_IDLE_CLOUD_READY) {
+        int duration_ms = ready_idle_post_happy_delay_ms();
+        s_ready_idle_variant_index = -1;
+        s_ready_idle_next_switch_us = 0;
+        s_ready_idle_completed_rounds = 0;
+        s_ready_idle_sleeping = false;
+        s_ready_idle_after_happy_us = esp_timer_get_time() + (int64_t)duration_ms * 1000LL;
+        s_ready_idle_happy_defer_logged = false;
+        s_ready_idle_standby_transition_pending = false;
+        s_ready_idle_standby_transition_deadline_us = 0;
+        ESP_LOGI(TAG, "Ready idle handoff armed after happy duration=%dms", duration_ms);
+        return;
+    }
+
+    s_ready_idle_variant_index = -1;
+    s_ready_idle_next_switch_us = 0;
+    s_ready_idle_completed_rounds = 0;
+    s_ready_idle_sleeping = false;
+    s_ready_idle_after_happy_us = 0;
+    s_ready_idle_happy_observed_us = 0;
+    s_ready_idle_happy_defer_logged = false;
+    s_ready_idle_standby_transition_pending = false;
+    s_ready_idle_standby_transition_deadline_us = 0;
+}
+
 static void transport_set_state(transport_state_t state, const char *reason) {
     if (state == s_transport_state) {
         return;
@@ -265,6 +317,7 @@ static void transport_set_state(transport_state_t state, const char *reason) {
     ESP_LOGI(TAG, "Transport state: %s -> %s (%s)", transport_state_to_string(s_transport_state),
              transport_state_to_string(state), reason ? reason : "no reason");
     s_transport_state = state;
+    update_ready_idle_handoff_deadline(state);
 }
 
 static void transport_schedule_retry(uint32_t delay_ms) {
@@ -1170,14 +1223,331 @@ static idle_hint_view_t get_idle_hint_view(idle_hint_mode_t mode) {
     }
 }
 
+static bool ready_idle_can_replace_happy(void) {
+    const char *current_state = behavior_state_get_current();
+    if (current_state == NULL || strcmp(current_state, "happy") != 0) {
+        s_ready_idle_happy_observed_us = 0;
+        return false;
+    }
+
+    int64_t now_us = esp_timer_get_time();
+    if (s_ready_idle_happy_observed_us == 0) {
+        s_ready_idle_happy_observed_us = now_us;
+        if (s_ready_idle_after_happy_us <= now_us) {
+            int duration_ms = ready_idle_post_happy_delay_ms();
+            s_ready_idle_after_happy_us = now_us + (int64_t)duration_ms * 1000LL;
+            s_ready_idle_happy_defer_logged = false;
+            ESP_LOGI(TAG, "Ready idle observed happy hold; handoff in %dms", duration_ms);
+        }
+    }
+
+    if (sfx_service_is_busy()) {
+        if (!s_ready_idle_happy_defer_logged) {
+            ESP_LOGI(TAG, "Ready idle waiting for happy SFX before standby variants");
+            s_ready_idle_happy_defer_logged = true;
+        }
+        return false;
+    }
+
+    if (now_us < s_ready_idle_after_happy_us) {
+        if (!s_ready_idle_happy_defer_logged) {
+            int64_t remaining_ms = (s_ready_idle_after_happy_us - now_us + 999LL) / 1000LL;
+            ESP_LOGI(TAG, "Ready idle waiting for happy animation handoff: remaining=%lldms", remaining_ms);
+            s_ready_idle_happy_defer_logged = true;
+        }
+        return false;
+    }
+
+    return true;
+}
+
+static bool idle_hint_is_blocked(idle_hint_mode_t desired_hint) {
+    if (behavior_state_is_action_active()) {
+        return true;
+    }
+
+    if (!behavior_state_is_busy()) {
+        return false;
+    }
+
+    if (desired_hint == IDLE_HINT_READY && ready_idle_can_replace_happy()) {
+        ESP_LOGI(TAG, "Ready idle replacing completed happy hold with standby variant");
+        return false;
+    }
+
+    return true;
+}
+
+static void reset_ready_idle_rotation(void) {
+    s_ready_idle_variant_index = -1;
+    s_ready_idle_next_switch_us = 0;
+    s_ready_idle_completed_rounds = 0;
+    s_ready_idle_sleeping = false;
+    s_ready_idle_standby_transition_pending = false;
+    s_ready_idle_standby_transition_deadline_us = 0;
+}
+
+static void schedule_ready_idle_retry(int64_t now_us) {
+    reset_ready_idle_rotation();
+    s_ready_idle_next_switch_us = now_us + (int64_t)READY_IDLE_FALLBACK_RETRY_MS * 1000LL;
+}
+
+static bool ready_idle_retry_pending(int64_t now_us) {
+    return s_ready_idle_variant_index < 0 && s_ready_idle_next_switch_us > 0 && now_us < s_ready_idle_next_switch_us;
+}
+
+static void mark_ready_idle_standby_transition_pending(void) {
+    const char *current_state = behavior_state_get_current();
+    if (current_state != NULL && strcmp(current_state, "standby") != 0) {
+        s_ready_idle_standby_transition_pending = true;
+        s_ready_idle_standby_transition_deadline_us =
+            esp_timer_get_time() + (int64_t)READY_IDLE_STANDBY_HANDOFF_TIMEOUT_MS * 1000LL;
+        return;
+    }
+
+    s_ready_idle_standby_transition_pending = false;
+    s_ready_idle_standby_transition_deadline_us = 0;
+}
+
+static bool ready_idle_waiting_for_standby_transition(const char *current_state, int64_t now_us) {
+    if (!s_ready_idle_standby_transition_pending) {
+        return false;
+    }
+
+    if (current_state != NULL && strcmp(current_state, "standby") == 0) {
+        s_ready_idle_standby_transition_pending = false;
+        s_ready_idle_standby_transition_deadline_us = 0;
+        return false;
+    }
+
+    if (current_state != NULL && strcmp(current_state, "happy") != 0) {
+        ESP_LOGI(TAG, "Ready idle cycle reset by active state=%s while standby handoff was pending", current_state);
+        reset_ready_idle_rotation();
+        return false;
+    }
+
+    if (s_ready_idle_standby_transition_deadline_us == 0 || now_us < s_ready_idle_standby_transition_deadline_us) {
+        return true;
+    }
+
+    ESP_LOGW(TAG, "Ready idle standby handoff timed out while state=%s; retrying later",
+             current_state != NULL ? current_state : "<unknown>");
+    schedule_ready_idle_retry(now_us);
+    return true;
+}
+
+static const char *ready_idle_variant_name(int index) {
+    static const char *names[READY_IDLE_VARIANT_COUNT] = {
+        "standby1",
+        "standby2",
+        "standby3",
+        "standby4",
+    };
+
+    if (index < 0 || index >= READY_IDLE_VARIANT_COUNT) {
+        return "standby";
+    }
+    return names[index];
+}
+
+static emoji_anim_type_t ready_idle_variant_type(int index) {
+    static const emoji_anim_type_t types[READY_IDLE_VARIANT_COUNT] = {
+        EMOJI_ANIM_STANDBY_1,
+        EMOJI_ANIM_STANDBY_2,
+        EMOJI_ANIM_STANDBY_3,
+        EMOJI_ANIM_STANDBY_4,
+    };
+
+    if (index < 0 || index >= READY_IDLE_VARIANT_COUNT) {
+        return EMOJI_ANIM_STANDBY;
+    }
+    return types[index];
+}
+
+static int collect_ready_idle_variants(int available[READY_IDLE_VARIANT_COUNT]) {
+    int available_count = 0;
+
+    for (int index = 0; index < READY_IDLE_VARIANT_COUNT; ++index) {
+        emoji_anim_type_t type = ready_idle_variant_type(index);
+        if (anim_catalog_has_type(type)) {
+            available[available_count++] = index;
+            continue;
+        }
+        if (!s_ready_idle_variant_unavailable_logged[index]) {
+            ESP_LOGW(TAG, "Ready idle variant unavailable in SD manifest: %s", ready_idle_variant_name(index));
+            s_ready_idle_variant_unavailable_logged[index] = true;
+        }
+    }
+
+    if (available_count == 0) {
+        if (!s_ready_idle_all_unavailable_logged) {
+            ESP_LOGW(TAG, "No ready idle variants available; falling back to standby");
+            s_ready_idle_all_unavailable_logged = true;
+        }
+        return -1;
+    }
+
+    s_ready_idle_all_unavailable_logged = false;
+    return available_count;
+}
+
+static int choose_ready_idle_variant(bool *completed_round) {
+    int available[READY_IDLE_VARIANT_COUNT] = {0};
+    int available_count = collect_ready_idle_variants(available);
+    if (completed_round != NULL) {
+        *completed_round = false;
+    }
+    if (available_count <= 0) {
+        return -1;
+    }
+
+    int current_pos = -1;
+    for (int pos = 0; pos < available_count; ++pos) {
+        if (available[pos] == s_ready_idle_variant_index) {
+            current_pos = pos;
+            break;
+        }
+    }
+
+    int next_pos = current_pos + 1;
+    if (next_pos >= available_count) {
+        next_pos = 0;
+        if (current_pos >= 0 && completed_round != NULL) {
+            *completed_round = true;
+        }
+    }
+    return available[next_pos];
+}
+
+static int ready_idle_variant_duration_ms(int index) {
+    int duration_ms = emoji_get_loop_duration_ms(ready_idle_variant_type(index));
+    if (duration_ms < READY_IDLE_MIN_VARIANT_DURATION_MS) {
+        duration_ms = READY_IDLE_MIN_VARIANT_DURATION_MS;
+    }
+    return duration_ms;
+}
+
+static bool apply_ready_idle_sleep(const idle_hint_view_t *view) {
+    esp_err_t ret = behavior_state_set_with_resources("standby", view->text, view->font_size, "standby", NULL);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to apply ready idle sleep standby: %s", esp_err_to_name(ret));
+        s_ready_idle_next_switch_us = esp_timer_get_time() + (int64_t)READY_IDLE_FALLBACK_RETRY_MS * 1000LL;
+        return false;
+    }
+
+    s_ready_idle_variant_index = -1;
+    s_ready_idle_next_switch_us = 0;
+    s_ready_idle_sleeping = true;
+    s_ready_idle_after_happy_us = 0;
+    s_ready_idle_happy_observed_us = 0;
+    s_ready_idle_happy_defer_logged = false;
+    mark_ready_idle_standby_transition_pending();
+    ESP_LOGI(TAG, "Ready idle sleep standby applied after %lu completed standby variant rounds",
+             (unsigned long)s_ready_idle_completed_rounds);
+    return true;
+}
+
+static bool apply_ready_idle_fallback_standby(const idle_hint_view_t *view, int64_t now_us) {
+    esp_err_t ret = behavior_state_set_with_resources("standby", view->text, view->font_size, "standby", NULL);
+    schedule_ready_idle_retry(now_us);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to apply ready idle fallback standby: %s", esp_err_to_name(ret));
+        return false;
+    }
+
+    mark_ready_idle_standby_transition_pending();
+    return true;
+}
+
+static bool apply_ready_idle_variant_if_due(const idle_hint_view_t *view, bool force) {
+    int64_t now_us = esp_timer_get_time();
+
+    if (s_ready_idle_sleeping) {
+        return true;
+    }
+
+    if (ready_idle_retry_pending(now_us)) {
+        return true;
+    }
+
+    if (!force && s_ready_idle_variant_index >= 0 && now_us < s_ready_idle_next_switch_us) {
+        return true;
+    }
+
+    bool completed_round = false;
+    int selected = choose_ready_idle_variant(&completed_round);
+    if (selected < 0) {
+        return apply_ready_idle_fallback_standby(view, now_us);
+    }
+
+    if (completed_round) {
+        s_ready_idle_completed_rounds++;
+        if (s_ready_idle_completed_rounds >= READY_IDLE_ROUNDS_BEFORE_SLEEP) {
+            return apply_ready_idle_sleep(view);
+        }
+    }
+
+    const char *anim_id = ready_idle_variant_name(selected);
+    esp_err_t ret = behavior_state_set_with_resources("standby", view->text, view->font_size, anim_id, NULL);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to apply ready idle variant %s: %s", anim_id, esp_err_to_name(ret));
+        schedule_ready_idle_retry(now_us);
+        return false;
+    }
+
+    int duration_ms = ready_idle_variant_duration_ms(selected);
+    s_ready_idle_variant_index = selected;
+    s_ready_idle_next_switch_us = now_us + (int64_t)duration_ms * 1000LL;
+    s_ready_idle_after_happy_us = 0;
+    s_ready_idle_happy_observed_us = 0;
+    s_ready_idle_happy_defer_logged = false;
+    mark_ready_idle_standby_transition_pending();
+    ESP_LOGI(TAG, "Ready idle variant applied: %s duration=%dms round=%lu/%d", anim_id, duration_ms,
+             (unsigned long)(s_ready_idle_completed_rounds + 1U), READY_IDLE_ROUNDS_BEFORE_SLEEP);
+    return true;
+}
+
 static void apply_idle_hint_if_needed(void) {
     static idle_hint_mode_t s_last_applied_hint = IDLE_HINT_READY;
     static bool s_hint_initialized = false;
     idle_hint_mode_t desired_hint = get_idle_hint_mode();
     idle_hint_view_t view = get_idle_hint_view(desired_hint);
 
-    if (behavior_state_is_busy() || behavior_state_is_action_active()) {
+    if (desired_hint != IDLE_HINT_READY) {
+        reset_ready_idle_rotation();
+    } else {
+        int64_t now_us = esp_timer_get_time();
+        const char *current_state = behavior_state_get_current();
+
+        if (ready_idle_waiting_for_standby_transition(current_state, now_us)) {
+            return;
+        }
+
+        bool cycle_active =
+            s_ready_idle_variant_index >= 0 || s_ready_idle_completed_rounds > 0 || s_ready_idle_sleeping;
+        if (cycle_active && current_state != NULL && strcmp(current_state, "standby") != 0) {
+            ESP_LOGI(TAG, "Ready idle cycle reset by active state=%s", current_state);
+            reset_ready_idle_rotation();
+        }
+
+        if (ready_idle_retry_pending(now_us)) {
+            return;
+        }
+    }
+
+    if (idle_hint_is_blocked(desired_hint)) {
         return;
+    }
+
+    if (desired_hint == IDLE_HINT_READY) {
+        bool force = !s_hint_initialized || desired_hint != s_last_applied_hint || s_ready_idle_variant_index < 0;
+        if (apply_ready_idle_variant_if_due(&view, force)) {
+            s_last_applied_hint = desired_hint;
+            s_hint_initialized = true;
+            return;
+        }
+    } else {
+        reset_ready_idle_rotation();
     }
 
     if (s_hint_initialized && desired_hint == s_last_applied_hint) {

@@ -17,6 +17,10 @@ typedef enum {
     EMOJI_CUSTOM_1,    /* reserved custom state */
     EMOJI_CUSTOM_2,    /* reserved custom state */
     EMOJI_CUSTOM_3,    /* reserved custom state */
+    EMOJI_STANDBY_1,   /* WebSocket-ready idle variant */
+    EMOJI_STANDBY_2,   /* WebSocket-ready idle variant */
+    EMOJI_STANDBY_3,   /* WebSocket-ready idle variant */
+    EMOJI_STANDBY_4,   /* WebSocket-ready idle variant */
     EMOJI_COUNT,       /* Sentinel */
     EMOJI_UNKNOWN = -1,
 } emoji_type_t;
@@ -64,10 +68,7 @@ int display_update(const char *text, const char *emoji, int font_size, display_r
  * @param out_result Output result (can be NULL)
  * @return 0 on success, -1 on error
  */
-int display_update_with_style(const char *text,
-                              const char *emoji,
-                              int font_size,
-                              display_text_style_t text_style,
+int display_update_with_style(const char *text, const char *emoji, int font_size, display_text_style_t text_style,
                               display_result_t *out_result);
 
 /**

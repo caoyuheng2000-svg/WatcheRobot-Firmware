@@ -348,6 +348,14 @@ static const char *hal_display_emoji_name(int emoji_id) {
         return "custom2";
     case 10:
         return "custom3";
+    case 11:
+        return "standby1";
+    case 12:
+        return "standby2";
+    case 13:
+        return "standby3";
+    case 14:
+        return "standby4";
     default:
         return "unknown";
     }
@@ -377,6 +385,14 @@ static int hal_display_anim_type_to_emoji_id(emoji_anim_type_t type) {
         return EMOJI_CUSTOM_2;
     case EMOJI_ANIM_CUSTOM_3:
         return EMOJI_CUSTOM_3;
+    case EMOJI_ANIM_STANDBY_1:
+        return EMOJI_STANDBY_1;
+    case EMOJI_ANIM_STANDBY_2:
+        return EMOJI_STANDBY_2;
+    case EMOJI_ANIM_STANDBY_3:
+        return EMOJI_STANDBY_3;
+    case EMOJI_ANIM_STANDBY_4:
+        return EMOJI_STANDBY_4;
     default:
         return -1;
     }
@@ -407,6 +423,14 @@ static emoji_anim_type_t map_emoji_type(int ui_emoji_id) {
         return EMOJI_ANIM_CUSTOM_2;   /* custom2 */
     case 10:                          /* EMOJI_CUSTOM_3 */
         return EMOJI_ANIM_CUSTOM_3;   /* custom3 */
+    case 11:                          /* EMOJI_STANDBY_1 */
+        return EMOJI_ANIM_STANDBY_1;  /* standby1 */
+    case 12:                          /* EMOJI_STANDBY_2 */
+        return EMOJI_ANIM_STANDBY_2;  /* standby2 */
+    case 13:                          /* EMOJI_STANDBY_3 */
+        return EMOJI_ANIM_STANDBY_3;  /* standby3 */
+    case 14:                          /* EMOJI_STANDBY_4 */
+        return EMOJI_ANIM_STANDBY_4;  /* standby4 */
     default:
         return EMOJI_ANIM_STANDBY;
     }

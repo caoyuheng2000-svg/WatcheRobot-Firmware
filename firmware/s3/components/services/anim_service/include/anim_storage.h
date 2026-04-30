@@ -42,6 +42,10 @@ typedef enum {
     EMOJI_ANIM_CUSTOM_1,
     EMOJI_ANIM_CUSTOM_2,
     EMOJI_ANIM_CUSTOM_3,
+    EMOJI_ANIM_STANDBY_1,
+    EMOJI_ANIM_STANDBY_2,
+    EMOJI_ANIM_STANDBY_3,
+    EMOJI_ANIM_STANDBY_4,
     EMOJI_ANIM_COUNT,
     EMOJI_ANIM_NONE = -1
 } emoji_anim_type_t;
@@ -90,6 +94,7 @@ const anim_catalog_type_info_t *anim_catalog_get_type_info(emoji_anim_type_t typ
 bool anim_catalog_has_type(emoji_anim_type_t type);
 int emoji_load_type(emoji_anim_type_t type);
 int emoji_get_frame_count(emoji_anim_type_t type);
+int emoji_get_loop_duration_ms(emoji_anim_type_t type);
 const char *emoji_type_name(emoji_anim_type_t type);
 
 int anim_frame_buffer_init(anim_frame_buffer_t *buffer, uint16_t width, uint16_t height);

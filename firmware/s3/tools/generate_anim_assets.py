@@ -27,7 +27,7 @@ except ImportError as exc:  # pragma: no cover - runtime dependency check
     raise SystemExit("Pillow is required. Install it with: python -m pip install Pillow") from exc
 
 
-PROJECT_VERSION = "v0.2.6"
+PROJECT_VERSION = "V2.0.0"
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 DEFAULT_INPUT_DIR = PROJECT_ROOT / "assets" / "gif"
@@ -47,6 +47,10 @@ ANIM_TYPES = [
     "custom1",
     "custom2",
     "custom3",
+    "standby1",
+    "standby2",
+    "standby3",
+    "standby4",
 ]
 
 NAME_LEN = 24
@@ -74,6 +78,10 @@ LEGACY_IMPORT_MAP = {
     "watcher-speaking": "speaking",
     "watcher-standby": "standby",
     "watcher-thinking": "thinking",
+    "watcher-standby1": "standby1",
+    "watcher-standby2": "standby2",
+    "watcher-standby3": "standby3",
+    "watcher-standby4": "standby4",
 }
 
 GIF_CANDIDATES = {
@@ -89,6 +97,10 @@ GIF_CANDIDATES = {
     "custom1": ["custom1.gif", "watcher-custom1.gif"],
     "custom2": ["custom2.gif", "watcher-custom2.gif"],
     "custom3": ["custom3.gif", "watcher-custom3.gif", "watcher-processing2.gif"],
+    "standby1": ["standby1.gif", "watcher-standby1.gif"],
+    "standby2": ["standby2.gif", "watcher-standby2.gif"],
+    "standby3": ["standby3.gif", "watcher-standby3.gif"],
+    "standby4": ["standby4.gif", "watcher-standby4.gif"],
 }
 
 
