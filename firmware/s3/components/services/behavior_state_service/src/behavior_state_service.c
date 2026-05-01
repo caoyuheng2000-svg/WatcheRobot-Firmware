@@ -1603,9 +1603,8 @@ static esp_err_t behavior_schedule_state_locked(const char *state_id, const char
         effective_state_id = s_ctx.catalog.default_state;
         if (behavior_is_same_state_action_request_locked(effective_state_id,
                                                          action_def != NULL ? action_def->id : NULL)) {
-            bool same_overrides =
-                behavior_is_same_override_request_locked(text, font_size, alert_text, anim_id, suppress_anim, sound_id,
-                                                         suppress_sound);
+            bool same_overrides = behavior_is_same_override_request_locked(text, font_size, alert_text, anim_id,
+                                                                           suppress_anim, sound_id, suppress_sound);
 
             if (same_overrides) {
                 ESP_LOGI(TAG, "Ignoring repeated request with unchanged overrides: state=%s action=%s",
@@ -1670,9 +1669,8 @@ static esp_err_t behavior_schedule_state_locked(const char *state_id, const char
 
     effective_state_id = state_def->id;
     if (behavior_is_same_state_action_request_locked(effective_state_id, action_def != NULL ? action_def->id : NULL)) {
-        bool same_overrides =
-            behavior_is_same_override_request_locked(text, font_size, alert_text, anim_id, suppress_anim, sound_id,
-                                                     suppress_sound);
+        bool same_overrides = behavior_is_same_override_request_locked(text, font_size, alert_text, anim_id,
+                                                                       suppress_anim, sound_id, suppress_sound);
 
         if (same_overrides) {
             ESP_LOGI(TAG, "Ignoring repeated request with unchanged overrides: state=%s action=%s", effective_state_id,
@@ -1758,9 +1756,9 @@ static void behavior_task(void *arg) {
                     state_request.has_anim_override && state_request.anim_id[0] != '\0' ? state_request.anim_id : NULL,
                     state_request.suppress_anim,
                     state_request.has_sound_override && state_request.sound_id[0] != '\0' ? state_request.sound_id
-                                                                                           : NULL,
-                    state_request.suppress_sound,
-                    state_request.action_id[0] != '\0' ? state_request.action_id : NULL, &display_request);
+                                                                                          : NULL,
+                    state_request.suppress_sound, state_request.action_id[0] != '\0' ? state_request.action_id : NULL,
+                    &display_request);
                 if (request_ret == ESP_OK) {
                     ESP_LOGI(TAG, "Applied queued state request state=%s action=%s", state_request.state_id,
                              state_request.action_id[0] != '\0' ? state_request.action_id : "<none>");
@@ -1815,9 +1813,9 @@ static void behavior_task(void *arg) {
                                 s_ctx.hold_logged = true;
                             }
                         } else {
-                            esp_err_t fallback_ret = behavior_schedule_state_locked(
-                                s_ctx.catalog.default_state, NULL, 0, false, NULL, false, NULL, false, NULL,
-                                &display_request);
+                            esp_err_t fallback_ret =
+                                behavior_schedule_state_locked(s_ctx.catalog.default_state, NULL, 0, false, NULL, false,
+                                                               NULL, false, NULL, &display_request);
                             if (fallback_ret != ESP_OK) {
                                 ESP_LOGW(TAG, "Fallback state request failed state=%s err=%s",
                                          s_ctx.catalog.default_state, esp_err_to_name(fallback_ret));

@@ -413,10 +413,9 @@ static void ws_tts_log_session_stats(const char *reason) {
              "TTS session %s: inbound_bytes=%llu enqueued_frames=%lu played_frames=%lu dropped_frames=%lu "
              "drop_timeout=%lu high=%lu enqueue_wait_events=%lu enqueue_wait_total_ms=%llu "
              "enqueue_wait_max_ms=%lu",
-             reason, (unsigned long long)inbound_bytes, (unsigned long)enqueued_frames,
-             (unsigned long)played_frames, (unsigned long)dropped_frames, (unsigned long)drop_timeout_frames,
-             (unsigned long)high_watermark, (unsigned long)wait_events, (unsigned long long)wait_total_ms,
-             (unsigned long)wait_max_ms);
+             reason, (unsigned long long)inbound_bytes, (unsigned long)enqueued_frames, (unsigned long)played_frames,
+             (unsigned long)dropped_frames, (unsigned long)drop_timeout_frames, (unsigned long)high_watermark,
+             (unsigned long)wait_events, (unsigned long long)wait_total_ms, (unsigned long)wait_max_ms);
 }
 
 static esp_err_t ws_tts_runtime_init(void) {
@@ -560,16 +559,15 @@ static esp_err_t ws_audio_queue_init(void) {
         BaseType_t task_ret;
 #ifdef CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY
         task_ret = xTaskCreateWithCaps(ws_audio_worker_task, "ws_audio_send", WS_AUDIO_WORKER_STACK, NULL,
-                                       WS_AUDIO_WORKER_PRIO, &s_audio_worker_task,
-                                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                                       WS_AUDIO_WORKER_PRIO, &s_audio_worker_task, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (task_ret != pdPASS) {
             ESP_LOGW(TAG, "failed to create audio worker in PSRAM, retrying internal RAM");
             task_ret = xTaskCreate(ws_audio_worker_task, "ws_audio_send", WS_AUDIO_WORKER_STACK, NULL,
                                    WS_AUDIO_WORKER_PRIO, &s_audio_worker_task);
         }
 #else
-        task_ret = xTaskCreate(ws_audio_worker_task, "ws_audio_send", WS_AUDIO_WORKER_STACK, NULL,
-                               WS_AUDIO_WORKER_PRIO, &s_audio_worker_task);
+        task_ret = xTaskCreate(ws_audio_worker_task, "ws_audio_send", WS_AUDIO_WORKER_STACK, NULL, WS_AUDIO_WORKER_PRIO,
+                               &s_audio_worker_task);
 #endif
         if (task_ret != pdPASS) {
             s_audio_worker_running = false;
@@ -667,7 +665,8 @@ static void ws_audio_worker_task(void *arg) {
                              "audio_send sent=%lu queued=%lu drop=%lu pending=%u high=%u delay_us=%lu send_us=%lu/%lu "
                              "packet=%u",
                              (unsigned long)s_audio_sent_frames, (unsigned long)s_audio_queued_frames,
-                             (unsigned long)s_audio_dropped_frames, (unsigned int)s_last_audio_queue_stats.pending_frames,
+                             (unsigned long)s_audio_dropped_frames,
+                             (unsigned int)s_last_audio_queue_stats.pending_frames,
                              (unsigned int)s_last_audio_queue_stats.high_watermark,
                              (unsigned long)s_audio_last_queue_delay_us, (unsigned long)send_stats.send_us,
                              (unsigned long)send_stats.total_us, (unsigned int)send_stats.packet_len);
@@ -2193,8 +2192,7 @@ void ws_handle_tts_binary(const uint8_t *data, int len) {
 
     if (len > WS_TTS_FRAME_BYTES) {
         ESP_LOGI(TAG, "tts payload split: len=%d chunks=%u slot=%u pending=%u high=%lu dropped=%lu", len,
-                 (unsigned int)((len + WS_TTS_FRAME_BYTES - 1) / WS_TTS_FRAME_BYTES),
-                 (unsigned int)WS_TTS_FRAME_BYTES,
+                 (unsigned int)((len + WS_TTS_FRAME_BYTES - 1) / WS_TTS_FRAME_BYTES), (unsigned int)WS_TTS_FRAME_BYTES,
                  (unsigned int)(s_tts_pending_slots != NULL ? uxQueueMessagesWaiting(s_tts_pending_slots) : 0U),
                  (unsigned long)s_tts_high_watermark, (unsigned long)s_tts_dropped_frames);
     }
@@ -2249,12 +2247,13 @@ void ws_handle_tts_binary(const uint8_t *data, int len) {
                 xSemaphoreGive(s_tts_queue_lock);
             }
 
-            ESP_LOGE(TAG,
-                     "tts enqueue timeout: waited_ms=%lu budget_ms=%lu pending=%lu high=%lu dropped=%lu drop_timeout=%lu "
-                     "inbound_bytes=%llu played_frames=%lu",
-                     (unsigned long)waited_ms, (unsigned long)remaining_wait_ms, (unsigned long)pending,
-                     (unsigned long)high, (unsigned long)dropped, (unsigned long)drop_timeout,
-                     (unsigned long long)inbound_bytes, (unsigned long)played_frames);
+            ESP_LOGE(
+                TAG,
+                "tts enqueue timeout: waited_ms=%lu budget_ms=%lu pending=%lu high=%lu dropped=%lu drop_timeout=%lu "
+                "inbound_bytes=%llu played_frames=%lu",
+                (unsigned long)waited_ms, (unsigned long)remaining_wait_ms, (unsigned long)pending, (unsigned long)high,
+                (unsigned long)dropped, (unsigned long)drop_timeout, (unsigned long long)inbound_bytes,
+                (unsigned long)played_frames);
             return;
         }
 
@@ -2286,8 +2285,8 @@ void ws_handle_tts_binary(const uint8_t *data, int len) {
         xSemaphoreGive(s_tts_queue_lock);
 
         if (waited_ms >= WS_TTS_WORKER_WAIT_MS) {
-            ESP_LOGD(TAG, "tts enqueue backpressure: waited_ms=%lu timeout_ms=%lu",
-                     (unsigned long)waited_ms, (unsigned long)WS_TTS_ENQUEUE_TIMEOUT_MS);
+            ESP_LOGD(TAG, "tts enqueue backpressure: waited_ms=%lu timeout_ms=%lu", (unsigned long)waited_ms,
+                     (unsigned long)WS_TTS_ENQUEUE_TIMEOUT_MS);
         }
 
         offset += chunk_len;

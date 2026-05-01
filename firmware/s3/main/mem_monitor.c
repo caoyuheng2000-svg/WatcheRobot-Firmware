@@ -204,7 +204,7 @@ static void mem_monitor_log_snapshot(const char *stage, const mem_monitor_snapsh
             mem_monitor_bytes_to_kb(snapshot->spiram.total_free_bytes),
             mem_monitor_bytes_to_kb(snapshot->spiram.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_spiram)
 #endif
-            ,
+                                                                              ,
             (unsigned)stack_hwm);
         return;
     }
@@ -229,32 +229,32 @@ static void mem_monitor_log_snapshot(const char *stage, const mem_monitor_snapsh
             mem_monitor_bytes_to_kb(snapshot->spiram.total_free_bytes),
             mem_monitor_bytes_to_kb(snapshot->spiram.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_spiram)
 #endif
-            ,
+                                                                              ,
             (unsigned)stack_hwm);
         return;
     }
 
-    ESP_LOGI(
-        TAG,
-        "[%s] %s int{free=%uKB largest=%uKB min=%uKB} dma{free=%uKB largest=%uKB min=%uKB} "
-        "8bit{free=%uKB largest=%uKB min=%uKB}"
+    ESP_LOGI(TAG,
+             "[%s] %s int{free=%uKB largest=%uKB min=%uKB} dma{free=%uKB largest=%uKB min=%uKB} "
+             "8bit{free=%uKB largest=%uKB min=%uKB}"
 #if CONFIG_SPIRAM
-        " psram{free=%uKB largest=%uKB min=%uKB}"
+             " psram{free=%uKB largest=%uKB min=%uKB}"
 #endif
-        " stack_hwm=%u",
-        safe_stage, status, mem_monitor_bytes_to_kb(snapshot->internal.total_free_bytes),
-        mem_monitor_bytes_to_kb(snapshot->internal.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_internal),
-        mem_monitor_bytes_to_kb(snapshot->dma.total_free_bytes),
-        mem_monitor_bytes_to_kb(snapshot->dma.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_dma),
-        mem_monitor_bytes_to_kb(snapshot->heap_8bit.total_free_bytes),
-        mem_monitor_bytes_to_kb(snapshot->heap_8bit.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_8bit)
+             " stack_hwm=%u",
+             safe_stage, status, mem_monitor_bytes_to_kb(snapshot->internal.total_free_bytes),
+             mem_monitor_bytes_to_kb(snapshot->internal.largest_free_block),
+             mem_monitor_bytes_to_kb(snapshot->min_internal), mem_monitor_bytes_to_kb(snapshot->dma.total_free_bytes),
+             mem_monitor_bytes_to_kb(snapshot->dma.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_dma),
+             mem_monitor_bytes_to_kb(snapshot->heap_8bit.total_free_bytes),
+             mem_monitor_bytes_to_kb(snapshot->heap_8bit.largest_free_block),
+             mem_monitor_bytes_to_kb(snapshot->min_8bit)
 #if CONFIG_SPIRAM
-                                                                             ,
-        mem_monitor_bytes_to_kb(snapshot->spiram.total_free_bytes),
-        mem_monitor_bytes_to_kb(snapshot->spiram.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_spiram)
+                 ,
+             mem_monitor_bytes_to_kb(snapshot->spiram.total_free_bytes),
+             mem_monitor_bytes_to_kb(snapshot->spiram.largest_free_block), mem_monitor_bytes_to_kb(snapshot->min_spiram)
 #endif
-        ,
-        (unsigned)stack_hwm);
+                                                                               ,
+             (unsigned)stack_hwm);
 }
 
 #if CONFIG_WATCHER_MEM_MONITOR_CHECK_INTEGRITY_ON_CRITICAL

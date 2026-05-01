@@ -1,8 +1,8 @@
 #include "hal_audio.h"
-#include "sdkconfig.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
 #include "sensecap-watcher.h"
 
 #define TAG "HAL_AUDIO"

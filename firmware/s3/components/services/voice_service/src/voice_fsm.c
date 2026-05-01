@@ -563,11 +563,12 @@ int voice_recorder_tick(void) {
         ESP_LOGI(TAG,
                  "audio frame=%d rms=%d peak=%d zeros=%d/%d q{p=%u hi=%u in=%lu out=%lu drop=%lu delay_us=%lu} "
                  "send_us=%lu/%lu packet=%u",
-                 g_stats.encode_count + 1, rms, peak, zero_count, sample_count, (unsigned int)queue_stats.pending_frames,
-                 (unsigned int)queue_stats.high_watermark, (unsigned long)queue_stats.queued_frames,
-                 (unsigned long)queue_stats.sent_frames, (unsigned long)queue_stats.dropped_frames,
-                 (unsigned long)queue_stats.last_queue_delay_us, (unsigned long)send_stats.send_us,
-                 (unsigned long)send_stats.total_us, (unsigned int)send_stats.packet_len);
+                 g_stats.encode_count + 1, rms, peak, zero_count, sample_count,
+                 (unsigned int)queue_stats.pending_frames, (unsigned int)queue_stats.high_watermark,
+                 (unsigned long)queue_stats.queued_frames, (unsigned long)queue_stats.sent_frames,
+                 (unsigned long)queue_stats.dropped_frames, (unsigned long)queue_stats.last_queue_delay_us,
+                 (unsigned long)send_stats.send_us, (unsigned long)send_stats.total_us,
+                 (unsigned int)send_stats.packet_len);
     }
 
 #ifdef CONFIG_ENABLE_WAKE_WORD
@@ -773,12 +774,11 @@ int voice_recorder_start(void) {
                               &g_voice_task_handle, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (ret != pdPASS) {
         ESP_LOGW(TAG, "Failed to create voice task in PSRAM, retrying internal RAM");
-        ret = xTaskCreate(voice_recorder_task, "voice_task", CONFIG_VOICE_TASK_STACK_SIZE, NULL, 5,
-                          &g_voice_task_handle);
+        ret =
+            xTaskCreate(voice_recorder_task, "voice_task", CONFIG_VOICE_TASK_STACK_SIZE, NULL, 5, &g_voice_task_handle);
     }
 #else
-    ret = xTaskCreate(voice_recorder_task, "voice_task", CONFIG_VOICE_TASK_STACK_SIZE, NULL, 5,
-                      &g_voice_task_handle);
+    ret = xTaskCreate(voice_recorder_task, "voice_task", CONFIG_VOICE_TASK_STACK_SIZE, NULL, 5, &g_voice_task_handle);
 #endif
 
     if (ret != pdPASS) {

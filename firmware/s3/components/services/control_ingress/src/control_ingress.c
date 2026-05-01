@@ -193,17 +193,16 @@ static esp_err_t control_apply_ai_status(const control_ai_status_request_t *req)
 
     for (i = 0; i < state_candidate_count; ++i) {
         ret = behavior_state_set_with_resources_and_action(state_candidates[i], text, 0,
-                                                           image_name[0] != '\0' ? image_name : NULL,
-                                                           status_sound_id, selected_action_id);
+                                                           image_name[0] != '\0' ? image_name : NULL, status_sound_id,
+                                                           selected_action_id);
         if (ret != ESP_ERR_NOT_FOUND) {
             break;
         }
     }
 
     if (ret == ESP_ERR_NOT_FOUND) {
-        ret =
-            behavior_state_set_with_resources_and_action("standby", text, 0, image_name[0] != '\0' ? image_name : NULL,
-                                                         status_sound_id, selected_action_id);
+        ret = behavior_state_set_with_resources_and_action(
+            "standby", text, 0, image_name[0] != '\0' ? image_name : NULL, status_sound_id, selected_action_id);
         if (ret == ESP_ERR_NOT_FOUND) {
             ESP_LOGW(TAG, "No local match for AI status=%s action=%s fallback=%s image=%s", req->status,
                      action_state_id[0] != '\0' ? action_state_id : "<none>",

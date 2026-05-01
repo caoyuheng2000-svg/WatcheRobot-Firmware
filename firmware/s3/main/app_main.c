@@ -1315,8 +1315,7 @@ static bool ready_idle_has_animation_headroom(int64_t now_us) {
     size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     size_t largest_dma = heap_caps_get_largest_free_block(MALLOC_CAP_DMA);
 
-    if (largest_internal >= READY_IDLE_MIN_INTERNAL_LARGEST_BYTES &&
-        largest_dma >= READY_IDLE_MIN_DMA_LARGEST_BYTES) {
+    if (largest_internal >= READY_IDLE_MIN_INTERNAL_LARGEST_BYTES && largest_dma >= READY_IDLE_MIN_DMA_LARGEST_BYTES) {
         return true;
     }
 
@@ -1528,8 +1527,7 @@ static bool apply_ready_idle_variant_if_due(const idle_hint_view_t *view, bool f
     if (!ready_idle_has_animation_headroom(now_us)) {
         s_ready_idle_memory_defers++;
         if (s_ready_idle_memory_defers >= READY_IDLE_MEMORY_FORCE_STANDBY_DEFERS) {
-            ESP_LOGW(TAG,
-                     "Ready idle memory pressure persisted for %lu retries; forcing text-only standby handoff",
+            ESP_LOGW(TAG, "Ready idle memory pressure persisted for %lu retries; forcing text-only standby handoff",
                      (unsigned long)s_ready_idle_memory_defers);
             s_ready_idle_memory_defers = 0;
             return apply_ready_idle_text_only_standby(view, now_us);
