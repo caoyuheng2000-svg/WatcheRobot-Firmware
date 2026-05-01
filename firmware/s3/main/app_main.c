@@ -57,8 +57,13 @@
 #define READY_IDLE_ROUNDS_BEFORE_SLEEP 5
 #define READY_IDLE_MIN_VARIANT_DURATION_MS 1000
 #define READY_IDLE_FALLBACK_RETRY_MS 10000
+#define READY_IDLE_MEMORY_RETRY_MS 3000
 #define READY_IDLE_POST_HAPPY_MIN_DELAY_MS 1200
 #define READY_IDLE_STANDBY_HANDOFF_TIMEOUT_MS 1000
+#define READY_IDLE_MIN_INTERNAL_LARGEST_BYTES (12U * 1024U)
+#define READY_IDLE_MIN_DMA_LARGEST_BYTES (12U * 1024U)
+#define READY_IDLE_MEMORY_PRESSURE_LOG_INTERVAL_US 10000000LL
+#define READY_IDLE_MEMORY_FORCE_STANDBY_DEFERS 3U
 #define CLOUD_DISCOVERY_TIMEOUT_MS 5000
 #define CLOUD_RETRY_DELAY_MS 2000
 #define CLOUD_PROTOCOL_RETRY_DELAY_MS 5000
@@ -158,6 +163,8 @@ static bool s_ready_idle_variant_unavailable_logged[READY_IDLE_VARIANT_COUNT] = 
 static bool s_ready_idle_all_unavailable_logged = false;
 static bool s_ready_idle_standby_transition_pending = false;
 static int64_t s_ready_idle_standby_transition_deadline_us = 0;
+static int64_t s_ready_idle_last_memory_pressure_log_us = 0;
+static uint32_t s_ready_idle_memory_defers = 0;
 static bool s_mcu_obs_state_initialized = false;
 static mcu_link_state_t s_last_mcu_obs_state = MCU_LINK_STATE_DOWN;
 static bool s_mcu_obs_stats_initialized = false;
@@ -369,10 +376,13 @@ static void configure_runtime_log_levels(void) {
 #if CONFIG_WATCHER_RUNTIME_QUIET_LOGS
     esp_log_level_set("*", ESP_LOG_WARN);
     esp_log_level_set(TAG, ESP_LOG_INFO);
-    esp_log_level_set(MCU_OBS_TAG, ESP_LOG_INFO);
+    esp_log_level_set(MCU_OBS_TAG, ESP_LOG_WARN);
     esp_log_level_set("MEM_MON", ESP_LOG_INFO);
     esp_log_level_set("BSP", ESP_LOG_INFO);
     esp_log_level_set("VOICE", ESP_LOG_INFO);
+    esp_log_level_set("HAL_AUDIO", ESP_LOG_INFO);
+    esp_log_level_set("HAL_WAKE_WORD", ESP_LOG_INFO);
+    esp_log_level_set("WS_CLIENT", ESP_LOG_INFO);
 #endif
 }
 
@@ -1225,6 +1235,8 @@ static idle_hint_view_t get_idle_hint_view(idle_hint_mode_t mode) {
     }
 }
 
+static bool ready_idle_has_animation_headroom(int64_t now_us);
+
 static bool ready_idle_can_replace_happy(void) {
     const char *current_state = behavior_state_get_current();
     if (current_state == NULL || strcmp(current_state, "happy") != 0) {
@@ -1287,6 +1299,7 @@ static void reset_ready_idle_rotation(void) {
     s_ready_idle_sleeping = false;
     s_ready_idle_standby_transition_pending = false;
     s_ready_idle_standby_transition_deadline_us = 0;
+    s_ready_idle_memory_defers = 0;
 }
 
 static void schedule_ready_idle_retry(int64_t now_us) {
@@ -1296,6 +1309,29 @@ static void schedule_ready_idle_retry(int64_t now_us) {
 
 static bool ready_idle_retry_pending(int64_t now_us) {
     return s_ready_idle_variant_index < 0 && s_ready_idle_next_switch_us > 0 && now_us < s_ready_idle_next_switch_us;
+}
+
+static bool ready_idle_has_animation_headroom(int64_t now_us) {
+    size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t largest_dma = heap_caps_get_largest_free_block(MALLOC_CAP_DMA);
+
+    if (largest_internal >= READY_IDLE_MIN_INTERNAL_LARGEST_BYTES && largest_dma >= READY_IDLE_MIN_DMA_LARGEST_BYTES) {
+        return true;
+    }
+
+    if (s_ready_idle_last_memory_pressure_log_us == 0 ||
+        (now_us - s_ready_idle_last_memory_pressure_log_us) >= READY_IDLE_MEMORY_PRESSURE_LOG_INTERVAL_US) {
+        ESP_LOGW(TAG, "Ready idle deferred under memory pressure: int_largest=%u dma_largest=%u need=%u/%u",
+                 (unsigned)largest_internal, (unsigned)largest_dma, (unsigned)READY_IDLE_MIN_INTERNAL_LARGEST_BYTES,
+                 (unsigned)READY_IDLE_MIN_DMA_LARGEST_BYTES);
+        s_ready_idle_last_memory_pressure_log_us = now_us;
+    }
+
+    return false;
+}
+
+static void schedule_ready_idle_memory_retry(int64_t now_us) {
+    s_ready_idle_next_switch_us = now_us + (int64_t)READY_IDLE_MEMORY_RETRY_MS * 1000LL;
 }
 
 static void mark_ready_idle_standby_transition_pending(void) {
@@ -1430,7 +1466,7 @@ static int ready_idle_variant_duration_ms(int index) {
 }
 
 static bool apply_ready_idle_sleep(const idle_hint_view_t *view) {
-    esp_err_t ret = behavior_state_set_with_resources("standby", view->text, view->font_size, "standby", NULL);
+    esp_err_t ret = behavior_state_set_with_resources("standby", view->text, view->font_size, "standby", "");
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to apply ready idle sleep standby: %s", esp_err_to_name(ret));
         s_ready_idle_next_switch_us = esp_timer_get_time() + (int64_t)READY_IDLE_FALLBACK_RETRY_MS * 1000LL;
@@ -1450,10 +1486,22 @@ static bool apply_ready_idle_sleep(const idle_hint_view_t *view) {
 }
 
 static bool apply_ready_idle_fallback_standby(const idle_hint_view_t *view, int64_t now_us) {
-    esp_err_t ret = behavior_state_set_with_resources("standby", view->text, view->font_size, "standby", NULL);
+    esp_err_t ret = behavior_state_set_with_resources("standby", view->text, view->font_size, "standby", "");
     schedule_ready_idle_retry(now_us);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to apply ready idle fallback standby: %s", esp_err_to_name(ret));
+        return false;
+    }
+
+    mark_ready_idle_standby_transition_pending();
+    return true;
+}
+
+static bool apply_ready_idle_text_only_standby(const idle_hint_view_t *view, int64_t now_us) {
+    esp_err_t ret = behavior_state_set_with_resources("standby", view->text, view->font_size, "", "");
+    schedule_ready_idle_retry(now_us);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to apply text-only ready idle standby: %s", esp_err_to_name(ret));
         return false;
     }
 
@@ -1476,6 +1524,19 @@ static bool apply_ready_idle_variant_if_due(const idle_hint_view_t *view, bool f
         return true;
     }
 
+    if (!ready_idle_has_animation_headroom(now_us)) {
+        s_ready_idle_memory_defers++;
+        if (s_ready_idle_memory_defers >= READY_IDLE_MEMORY_FORCE_STANDBY_DEFERS) {
+            ESP_LOGW(TAG, "Ready idle memory pressure persisted for %lu retries; forcing text-only standby handoff",
+                     (unsigned long)s_ready_idle_memory_defers);
+            s_ready_idle_memory_defers = 0;
+            return apply_ready_idle_text_only_standby(view, now_us);
+        }
+        schedule_ready_idle_memory_retry(now_us);
+        return true;
+    }
+    s_ready_idle_memory_defers = 0;
+
     bool completed_round = false;
     int selected = choose_ready_idle_variant(&completed_round);
     if (selected < 0) {
@@ -1490,7 +1551,7 @@ static bool apply_ready_idle_variant_if_due(const idle_hint_view_t *view, bool f
     }
 
     const char *anim_id = ready_idle_variant_name(selected);
-    esp_err_t ret = behavior_state_set_with_resources("standby", view->text, view->font_size, anim_id, NULL);
+    esp_err_t ret = behavior_state_set_with_resources("standby", view->text, view->font_size, anim_id, "");
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to apply ready idle variant %s: %s", anim_id, esp_err_to_name(ret));
         schedule_ready_idle_retry(now_us);
@@ -1514,6 +1575,11 @@ static void apply_idle_hint_if_needed(void) {
     static bool s_hint_initialized = false;
     idle_hint_mode_t desired_hint = get_idle_hint_mode();
     idle_hint_view_t view = get_idle_hint_view(desired_hint);
+
+    if (voice_recorder_get_state() != VOICE_STATE_IDLE) {
+        reset_ready_idle_rotation();
+        return;
+    }
 
     if (desired_hint != IDLE_HINT_READY) {
         reset_ready_idle_rotation();

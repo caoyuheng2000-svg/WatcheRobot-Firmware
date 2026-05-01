@@ -1,8 +1,8 @@
 #include "hal_audio.h"
-#include "sdkconfig.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
 #include "sensecap-watcher.h"
 
 #define TAG "HAL_AUDIO"
@@ -16,6 +16,7 @@ static bool is_running = false;                           /* current running sta
 static uint32_t current_sample_rate = SAMPLE_RATE_RECORD; /* current sample rate */
 static esp_codec_dev_handle_t mic_handle = NULL;
 static esp_codec_dev_handle_t speaker_handle = NULL;
+static uint32_t consecutive_read_failures = 0;
 
 /* Initialize codec once at system startup */
 int hal_audio_init(void) {
@@ -109,10 +110,6 @@ bool hal_audio_is_playback_mode(void) {
 }
 
 int hal_audio_start(void) {
-    if (is_running) {
-        return 0;
-    }
-
     /* Ensure codec is initialized */
     if (!codec_initialized) {
         if (hal_audio_init() != 0) {
@@ -120,13 +117,21 @@ int hal_audio_start(void) {
         }
     }
 
-    /* NOTE: Don't call bsp_codec_dev_resume() here because it uses
-     * hardcoded DRV_AUDIO_SAMPLE_RATE (16kHz), which would override
-     * the sample rate we just set in hal_audio_set_sample_rate().
-     * The sample rate is already configured correctly.
-     */
+    if (is_running) {
+        consecutive_read_failures = 0;
+        ESP_LOGD(TAG, "Audio already running (sample rate: %lu Hz, playback=%d)", current_sample_rate,
+                 is_playback_mode);
+        return 0;
+    }
+
+    esp_err_t ret = bsp_codec_set_fs(current_sample_rate, 16, 1);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open audio path at %lu Hz: %s", current_sample_rate, esp_err_to_name(ret));
+        return -1;
+    }
 
     is_running = true;
+    consecutive_read_failures = 0;
     ESP_LOGI(TAG, "Audio started (sample rate: %lu Hz)", current_sample_rate);
     return 0;
 }
@@ -151,8 +156,12 @@ int hal_audio_read(uint8_t *out_buf, int max_len) {
 
     if (ret != ESP_OK) {
 #ifdef CONFIG_ENABLE_WAKE_WORD
-        /* In wake word mode, temporary read errors are expected during sample rate switches */
-        ESP_LOGD(TAG, "Read temporarily unavailable: %s", esp_err_to_name(ret));
+        consecutive_read_failures++;
+        if (consecutive_read_failures == 1U || (consecutive_read_failures % 50U) == 0U) {
+            ESP_LOGW(TAG, "Read temporarily unavailable: %s (count=%lu running=%d playback=%d rate=%lu)",
+                     esp_err_to_name(ret), (unsigned long)consecutive_read_failures, is_running, is_playback_mode,
+                     current_sample_rate);
+        }
         return 0;
 #else
         ESP_LOGE(TAG, "Read error: %s", esp_err_to_name(ret));
@@ -160,6 +169,7 @@ int hal_audio_read(uint8_t *out_buf, int max_len) {
 #endif
     }
 
+    consecutive_read_failures = 0;
     return (int)bytes_read;
 }
 
@@ -188,9 +198,28 @@ int hal_audio_stop(void) {
         return 0;
     }
 
+#ifdef CONFIG_ENABLE_WAKE_WORD
+    /* Wake word detection needs a continuous 16 kHz microphone stream.
+     * Playback users call stop after local SFX/TTS; in wake mode, restore
+     * the shared codec path to recording instead of disabling it. */
+    if (is_playback_mode) {
+        is_playback_mode = false;
+    }
+    current_sample_rate = SAMPLE_RATE_RECORD;
+    esp_err_t ret = bsp_codec_set_fs(current_sample_rate, 16, 1);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to restore wake audio path: %s", esp_err_to_name(ret));
+        is_running = false;
+        return -1;
+    }
+    consecutive_read_failures = 0;
+    ESP_LOGI(TAG, "Audio stop requested; wake word path restored at %lu Hz", current_sample_rate);
+    return 0;
+#else
     /* Just mark as stopped, don't actually stop the codec */
     /* This avoids I2S reconfiguration issues */
     is_running = false;
     ESP_LOGI(TAG, "Audio stopped (codec stays running)");
     return 0;
+#endif
 }

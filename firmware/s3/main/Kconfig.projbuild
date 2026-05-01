@@ -74,8 +74,8 @@ menu "Watcher Memory Monitor"
 
     config WATCHER_MEM_MONITOR_TASK_STACK_SIZE
         int "Memory monitor task stack size"
-        range 1536 4096
-        default 2048
+        range 1536 8192
+        default 4096
         help
             Stack size for the low-priority memory monitor task. The task only
             samples heap counters and is allocated with an external stack when
@@ -127,7 +127,7 @@ menu "Watcher Memory Monitor"
 
     config WATCHER_MEM_MONITOR_CHECK_INTEGRITY_ON_CRITICAL
         bool "Run heap integrity check during critical pressure"
-        default y
+        default n
         help
             Run heap_caps_check_integrity_all() when the monitor enters the
             critical band, rate-limited by the alert repeat period.

@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "hal_audio.h"
@@ -17,9 +18,11 @@
 
 #define TAG "VOICE"
 #define LISTENING_UI_MIN_INTERNAL_FREE_BYTES (28U * 1024U)
-#define LISTENING_UI_MIN_INTERNAL_LARGEST_BYTES (16U * 1024U)
-#define LISTENING_UI_TEXT_ONLY_MIN_INTERNAL_FREE_BYTES (24U * 1024U)
-#define LISTENING_UI_TEXT_ONLY_MIN_INTERNAL_LARGEST_BYTES (14U * 1024U)
+#define LISTENING_UI_MIN_INTERNAL_LARGEST_BYTES (8U * 1024U)
+#define LISTENING_UI_TEXT_ONLY_MIN_INTERNAL_FREE_BYTES (20U * 1024U)
+#define LISTENING_UI_TEXT_ONLY_MIN_INTERNAL_LARGEST_BYTES (6U * 1024U)
+#define RECORDING_FREEZE_MIN_INTERNAL_FREE_BYTES (24U * 1024U)
+#define RECORDING_FREEZE_MIN_INTERNAL_LARGEST_BYTES (14U * 1024U)
 
 /* ------------------------------------------------------------------ */
 /* Private: Wake word context                                         */
@@ -54,6 +57,16 @@ static bool g_recording_triggered_by_wake_word = false;
 static uint8_t g_pcm_buf[PCM_FRAME_SIZE];
 
 #define VOICE_EVENT_QUEUE_LEN 4
+#ifdef CONFIG_VOICE_AUDIO_STATS_LOG_INTERVAL_FRAMES
+#define VOICE_AUDIO_STATS_LOG_INTERVAL_FRAMES CONFIG_VOICE_AUDIO_STATS_LOG_INTERVAL_FRAMES
+#else
+#define VOICE_AUDIO_STATS_LOG_INTERVAL_FRAMES 60
+#endif
+#ifdef CONFIG_WAKE_IDLE_STATS_LOG_INTERVAL_FRAMES
+#define WAKE_IDLE_STATS_LOG_INTERVAL_FRAMES CONFIG_WAKE_IDLE_STATS_LOG_INTERVAL_FRAMES
+#else
+#define WAKE_IDLE_STATS_LOG_INTERVAL_FRAMES 120
+#endif
 
 #if CONFIG_WATCHER_LOG_HEAP_DIAGNOSTICS
 #define LOG_INTERNAL_HEAP_STATE(stage) log_internal_heap_state(stage)
@@ -108,7 +121,18 @@ static bool has_text_only_listening_ui_headroom(size_t *free_internal_out, size_
 }
 
 static bool can_freeze_animation_for_recording(size_t *free_internal_out, size_t *largest_internal_out) {
-    return has_text_only_listening_ui_headroom(free_internal_out, largest_internal_out);
+    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+
+    if (free_internal_out != NULL) {
+        *free_internal_out = free_internal;
+    }
+    if (largest_internal_out != NULL) {
+        *largest_internal_out = largest_internal;
+    }
+
+    return free_internal >= RECORDING_FREEZE_MIN_INTERNAL_FREE_BYTES &&
+           largest_internal >= RECORDING_FREEZE_MIN_INTERNAL_LARGEST_BYTES;
 }
 
 static void freeze_current_animation(void) {
@@ -131,14 +155,14 @@ static void show_listening_ui(void) {
     }
 
     if (has_listening_ui_headroom(&free_internal, &largest_internal)) {
-        behavior_state_set_with_text("listening", "Listening...", 0);
+        behavior_state_set_with_resources("listening", "Listening...", 0, NULL, "");
         return;
     }
 
     if (has_text_only_listening_ui_headroom(&free_internal, &largest_internal)) {
         ESP_LOGW(TAG, "Low internal heap, using text-only listening UI: free=%u KB largest=%u KB",
                  (unsigned)(free_internal / 1024U), (unsigned)(largest_internal / 1024U));
-        behavior_state_set_text_style("Listening...", 24, false);
+        behavior_state_set_with_resources("listening", "Listening...", 24, "", "");
         return;
     }
 
@@ -322,7 +346,9 @@ static int start_recording(void) {
 static int stop_recording(void) {
     /* In wake word mode, keep audio running for continuous detection */
 #ifdef CONFIG_ENABLE_WAKE_WORD
-    if (!g_recording_triggered_by_wake_word) {
+    if (g_wake_word_ctx != NULL) {
+        hal_wake_word_start(g_wake_word_ctx);
+    } else {
         hal_audio_stop();
     }
     /* Wake word mode: audio stays running for next detection */
@@ -429,7 +455,14 @@ int voice_recorder_tick(void) {
     int pcm_len = 0;
 
 #ifdef CONFIG_ENABLE_WAKE_WORD
+    static uint32_t wake_idle_frame_count = 0;
+    static bool wake_audio_first_read_logged = false;
+
     /* Read audio for both wake word detection and recording */
+    if (!wake_audio_first_read_logged) {
+        wake_audio_first_read_logged = true;
+        ESP_LOGI(TAG, "Wake audio loop entering first microphone read");
+    }
     pcm_len = hal_audio_read(g_pcm_buf, PCM_FRAME_SIZE);
     if (pcm_len < 0) {
         ESP_LOGE(TAG, "Audio read error");
@@ -449,6 +482,31 @@ int voice_recorder_tick(void) {
         /* Yield after feed so higher-priority detection task can call fetch()
          * before we loop back. Prevents AFE FEED ring buffer overflow. */
         taskYIELD();
+
+        wake_idle_frame_count++;
+        if (WAKE_IDLE_STATS_LOG_INTERVAL_FRAMES > 0 &&
+            (wake_idle_frame_count % WAKE_IDLE_STATS_LOG_INTERVAL_FRAMES) == 0U) {
+            int64_t idle_sum_sq = 0;
+            int16_t idle_peak = 0;
+            int idle_zero_count = 0;
+            for (size_t i = 0; i < num_samples; i++) {
+                int16_t s = samples[i];
+                if (s == 0) {
+                    idle_zero_count++;
+                }
+                if (s < 0) {
+                    s = -s;
+                }
+                idle_sum_sq += (int64_t)s * s;
+                if (s > idle_peak) {
+                    idle_peak = s;
+                }
+            }
+            int idle_rms = num_samples > 0 ? (int)sqrt((double)(idle_sum_sq / (int64_t)num_samples)) : 0;
+            ESP_LOGI(TAG, "wake_idle frame=%lu rms=%d peak=%d zeros=%d/%u feed=%u",
+                     (unsigned long)wake_idle_frame_count, idle_rms, idle_peak, idle_zero_count, (unsigned)num_samples,
+                     (unsigned)hal_wake_word_get_feed_size(g_wake_word_ctx));
+        }
     }
 
     /* Only send to WebSocket when recording */
@@ -495,24 +553,22 @@ int voice_recorder_tick(void) {
     int rms = (int)(sum_sq / sample_count);
     rms = (int)sqrt((double)rms);
 
-    /* Log every 10 frames */
-    if (g_stats.encode_count % 10 == 0) {
+    if (VOICE_AUDIO_STATS_LOG_INTERVAL_FRAMES > 0 &&
+        g_stats.encode_count % VOICE_AUDIO_STATS_LOG_INTERVAL_FRAMES == 0) {
         ws_client_audio_queue_stats_t queue_stats = {0};
         ws_client_media_send_stats_t send_stats = {0};
 
         ws_client_get_audio_queue_stats(&queue_stats);
         ws_client_get_media_send_stats(&send_stats);
         ESP_LOGI(TAG,
-                 "Audio: frame#%d rms=%d peak=%d zeros=%d/%d queue{pending=%u high=%u queued=%lu sent=%lu dropped=%lu "
-                 "delay=%lu end=%d first=%d} "
-                 "send{total=%lu lock=%lu send=%lu payload=%u packet=%u}",
+                 "audio frame=%d rms=%d peak=%d zeros=%d/%d q{p=%u hi=%u in=%lu out=%lu drop=%lu delay_us=%lu} "
+                 "send_us=%lu/%lu packet=%u",
                  g_stats.encode_count + 1, rms, peak, zero_count, sample_count,
                  (unsigned int)queue_stats.pending_frames, (unsigned int)queue_stats.high_watermark,
                  (unsigned long)queue_stats.queued_frames, (unsigned long)queue_stats.sent_frames,
                  (unsigned long)queue_stats.dropped_frames, (unsigned long)queue_stats.last_queue_delay_us,
-                 queue_stats.end_pending, queue_stats.first_frame_pending, (unsigned long)send_stats.total_us,
-                 (unsigned long)send_stats.lock_wait_us, (unsigned long)send_stats.send_us,
-                 (unsigned int)send_stats.payload_len, (unsigned int)send_stats.packet_len);
+                 (unsigned long)send_stats.send_us, (unsigned long)send_stats.total_us,
+                 (unsigned int)send_stats.packet_len);
     }
 
 #ifdef CONFIG_ENABLE_WAKE_WORD
@@ -683,11 +739,20 @@ int voice_recorder_start(void) {
     }
 
 #ifdef CONFIG_ENABLE_WAKE_WORD
-    /* Avoid reserving audio DMA at boot. On S3 this can starve UI/WS/camera
-     * of internal heap and lead to resets before the user even starts
-     * recording. Keep the system in button-triggered mode and only request
-     * audio when an actual recording begins. */
-    ESP_LOGW(TAG, "Wake word boot activation disabled; audio will start on demand");
+    if (hal_wake_word_is_supported()) {
+        hal_audio_set_playback_mode(false);
+        hal_audio_set_sample_rate(16000);
+        if (hal_audio_start() != 0) {
+            ESP_LOGE(TAG, "Failed to start audio capture for wake word detection");
+            return -1;
+        }
+        if (wake_word_setup() != 0) {
+            hal_audio_stop();
+            return -1;
+        }
+    } else {
+        ESP_LOGW(TAG, "Wake word detection requested but hardware support is unavailable");
+    }
 #endif
 
     if (!g_button_callback_registered) {
@@ -703,10 +768,25 @@ int voice_recorder_start(void) {
 
     /* Start voice recorder task */
     g_task_running = true;
-    BaseType_t ret = xTaskCreate(voice_recorder_task, "voice_task", 4096, NULL, 5, &g_voice_task_handle);
+    BaseType_t ret;
+#ifdef CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY
+    ret = xTaskCreateWithCaps(voice_recorder_task, "voice_task", CONFIG_VOICE_TASK_STACK_SIZE, NULL, 5,
+                              &g_voice_task_handle, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (ret != pdPASS) {
+        ESP_LOGW(TAG, "Failed to create voice task in PSRAM, retrying internal RAM");
+        ret =
+            xTaskCreate(voice_recorder_task, "voice_task", CONFIG_VOICE_TASK_STACK_SIZE, NULL, 5, &g_voice_task_handle);
+    }
+#else
+    ret = xTaskCreate(voice_recorder_task, "voice_task", CONFIG_VOICE_TASK_STACK_SIZE, NULL, 5, &g_voice_task_handle);
+#endif
 
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Task create failed");
+#ifdef CONFIG_ENABLE_WAKE_WORD
+        wake_word_cleanup();
+        hal_audio_stop();
+#endif
         g_task_running = false;
         return -1;
     }

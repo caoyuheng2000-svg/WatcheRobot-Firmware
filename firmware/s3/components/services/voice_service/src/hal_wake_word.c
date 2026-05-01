@@ -13,6 +13,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include <string.h>
 
@@ -33,11 +34,21 @@
 /* ------------------------------------------------------------------ */
 
 #define DETECTION_RUNNING_BIT (1 << 0)
+#define DETECTION_FETCH_ACTIVE_BIT (1 << 1)
+#define DETECTION_STOP_WAIT_MS 100
 #define MAX_WAKE_WORDS 16
 #define MAX_WAKE_WORD_LEN 32
-#define DETECTION_TASK_STACK 4096
-#define DETECTION_TASK_PRIO 6
+#define DETECTION_TASK_STACK CONFIG_WAKE_WORD_TASK_STACK_SIZE
+#define DETECTION_TASK_PRIO CONFIG_WAKE_WORD_TASK_PRIORITY
 #define INPUT_BUFFER_CAPACITY 2048 /* samples */
+
+#ifdef CONFIG_WAKE_WORD_DET_MODE_95
+#define WAKE_WORD_DET_MODE DET_MODE_95
+#define WAKE_WORD_DET_MODE_NAME "DET_MODE_95"
+#else
+#define WAKE_WORD_DET_MODE DET_MODE_90
+#define WAKE_WORD_DET_MODE_NAME "DET_MODE_90"
+#endif
 
 /* ------------------------------------------------------------------ */
 /* Context Structure                                                */
@@ -52,6 +63,7 @@ struct wake_word_ctx_s {
     /* Detection Task */
     EventGroupHandle_t event_group;
     TaskHandle_t detection_task;
+    SemaphoreHandle_t state_lock;
 
     /* Callback */
     wake_word_callback_t callback;
@@ -96,10 +108,20 @@ static void detection_task(void *arg) {
          * Using Task Notification (45% faster than semaphore, less RAM). */
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
+        if (!(xEventGroupGetBits(ctx->event_group) & DETECTION_RUNNING_BIT)) {
+            continue;
+        }
+
         /* Fetch detection result */
+        xEventGroupSetBits(ctx->event_group, DETECTION_FETCH_ACTIVE_BIT);
         afe_fetch_result_t *res = ctx->afe_iface->fetch(ctx->afe_data);
+        xEventGroupClearBits(ctx->event_group, DETECTION_FETCH_ACTIVE_BIT);
 
         if (res == NULL || res->ret_value == ESP_FAIL) {
+            continue;
+        }
+
+        if (!(xEventGroupGetBits(ctx->event_group) & DETECTION_RUNNING_BIT)) {
             continue;
         }
 
@@ -205,6 +227,14 @@ wake_word_ctx_t *hal_wake_word_init(const wake_word_config_t *config) {
         return NULL;
     }
 
+    ctx->state_lock = xSemaphoreCreateMutex();
+    if (ctx->state_lock == NULL) {
+        ESP_LOGE(TAG, "Failed to create state lock");
+        vEventGroupDelete(ctx->event_group);
+        free(ctx);
+        return NULL;
+    }
+
     /* Initialize model list */
     if (config->model_path != NULL) {
         ctx->models = esp_srmodel_init(config->model_path);
@@ -214,6 +244,7 @@ wake_word_ctx_t *hal_wake_word_init(const wake_word_config_t *config) {
 
     if (ctx->models == NULL || ctx->models->num == -1) {
         ESP_LOGE(TAG, "Failed to initialize wakenet model");
+        vSemaphoreDelete(ctx->state_lock);
         vEventGroupDelete(ctx->event_group);
         free(ctx);
         return NULL;
@@ -246,36 +277,50 @@ wake_word_ctx_t *hal_wake_word_init(const wake_word_config_t *config) {
     if (wakenet_model == NULL) {
         ESP_LOGE(TAG, "No wakenet model found");
         esp_srmodel_deinit(ctx->models);
+        vSemaphoreDelete(ctx->state_lock);
         vEventGroupDelete(ctx->event_group);
         free(ctx);
         return NULL;
     }
 
-    /* Configure AFE */
-    /* Single microphone, no reference channel */
-    const char *input_format = "M"; /* M = microphone, R = reference */
-
-    afe_config_t *afe_config = afe_config_init(input_format, ctx->models, AFE_TYPE_SR, AFE_MODE_HIGH_PERF);
+    afe_config_t *afe_config = (afe_config_t *)calloc(1, sizeof(afe_config_t));
     if (afe_config == NULL) {
         ESP_LOGE(TAG, "Failed to init AFE config");
         esp_srmodel_deinit(ctx->models);
+        vSemaphoreDelete(ctx->state_lock);
         vEventGroupDelete(ctx->event_group);
         free(ctx);
         return NULL;
     }
+    *afe_config = (afe_config_t)AFE_CONFIG_DEFAULT();
 
     /* Configure AFE for ESP32-S3 with PSRAM */
-    afe_config->aec_init = false;                                /* No acoustic echo cancellation */
-    afe_config->afe_perferred_core = 1;                          /* Run on core 1 */
-    afe_config->afe_perferred_priority = 3;                      /* Medium priority */
+    afe_config->aec_init = false; /* No acoustic echo cancellation */
+    afe_config->se_init = true;
+    afe_config->vad_init = false;
+    afe_config->wakenet_init = true;
+    afe_config->wakenet_model_name = (char *)wakenet_model;
+    afe_config->wakenet_mode = WAKE_WORD_DET_MODE;
+    afe_config->afe_mode = SR_MODE_HIGH_PERF;
+    afe_config->afe_perferred_core = 1;     /* Run on core 1 */
+    afe_config->afe_perferred_priority = 3; /* Medium priority */
+    afe_config->afe_ringbuf_size = 50;
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM; /* Use PSRAM */
+    afe_config->afe_linear_gain = 2.0f;
+    afe_config->pcm_config.total_ch_num = 1;
+    afe_config->pcm_config.mic_num = 1;
+    afe_config->pcm_config.ref_num = 0;
+    afe_config->pcm_config.sample_rate = 16000;
+    ESP_LOGI(TAG, "WakeNet model=%s det_mode=%s memory=MORE_PSRAM linear_gain=%.1f", wakenet_model,
+             WAKE_WORD_DET_MODE_NAME, afe_config->afe_linear_gain);
 
     /* Get AFE interface */
-    ctx->afe_iface = esp_afe_handle_from_config(afe_config);
+    ctx->afe_iface = &ESP_AFE_SR_HANDLE;
     if (ctx->afe_iface == NULL) {
         ESP_LOGE(TAG, "Failed to get AFE interface");
         free(afe_config);
         esp_srmodel_deinit(ctx->models);
+        vSemaphoreDelete(ctx->state_lock);
         vEventGroupDelete(ctx->event_group);
         free(ctx);
         return NULL;
@@ -287,6 +332,7 @@ wake_word_ctx_t *hal_wake_word_init(const wake_word_config_t *config) {
         ESP_LOGE(TAG, "Failed to create AFE data");
         free(afe_config);
         esp_srmodel_deinit(ctx->models);
+        vSemaphoreDelete(ctx->state_lock);
         vEventGroupDelete(ctx->event_group);
         free(ctx);
         return NULL;
@@ -305,6 +351,7 @@ wake_word_ctx_t *hal_wake_word_init(const wake_word_config_t *config) {
         ctx->afe_iface->destroy(ctx->afe_data);
         free(afe_config);
         esp_srmodel_deinit(ctx->models);
+        vSemaphoreDelete(ctx->state_lock);
         vEventGroupDelete(ctx->event_group);
         free(ctx);
         return NULL;
@@ -313,7 +360,8 @@ wake_word_ctx_t *hal_wake_word_init(const wake_word_config_t *config) {
 
     free(afe_config);
 
-    /* Create detection task */
+    /* Keep the ESP-SR detection task stack in internal RAM; this path runs through
+     * vendor DSP code during TTS handoff and is not a good PSRAM-stack candidate. */
     BaseType_t ret = xTaskCreate(detection_task, "wake_detect", DETECTION_TASK_STACK, ctx, DETECTION_TASK_PRIO,
                                  &ctx->detection_task);
 
@@ -322,6 +370,7 @@ wake_word_ctx_t *hal_wake_word_init(const wake_word_config_t *config) {
         heap_caps_free(ctx->input_buffer);
         ctx->afe_iface->destroy(ctx->afe_data);
         esp_srmodel_deinit(ctx->models);
+        vSemaphoreDelete(ctx->state_lock);
         vEventGroupDelete(ctx->event_group);
         free(ctx);
         return NULL;
@@ -345,11 +394,20 @@ void hal_wake_word_feed(wake_word_ctx_t *ctx, const int16_t *samples, size_t num
         return; /* Detection is stopped */
     }
 
+    if (ctx->state_lock == NULL || xSemaphoreTake(ctx->state_lock, pdMS_TO_TICKS(20)) != pdTRUE) {
+        return;
+    }
+
     /* Accumulate samples in input buffer */
     size_t samples_needed = num_samples;
     size_t samples_offset = 0;
 
     while (samples_needed > 0) {
+        if (!(xEventGroupGetBits(ctx->event_group) & DETECTION_RUNNING_BIT)) {
+            ctx->input_buffer_size = 0;
+            break;
+        }
+
         /* Calculate how much we can add to buffer */
         size_t space_available = INPUT_BUFFER_CAPACITY - ctx->input_buffer_size;
         size_t samples_to_add = (samples_needed < space_available) ? samples_needed : space_available;
@@ -380,6 +438,8 @@ void hal_wake_word_feed(wake_word_ctx_t *ctx, const int16_t *samples, size_t num
             ctx->input_buffer_size = remaining;
         }
     }
+
+    xSemaphoreGive(ctx->state_lock);
 }
 
 /* ------------------------------------------------------------------ */
@@ -400,11 +460,37 @@ void hal_wake_word_start(wake_word_ctx_t *ctx) {
 }
 
 void hal_wake_word_stop(wake_word_ctx_t *ctx) {
+    bool state_locked = false;
+    bool fetch_active = false;
+
     if (ctx == NULL) {
         return;
     }
 
     xEventGroupClearBits(ctx->event_group, DETECTION_RUNNING_BIT);
+
+    if (ctx->detection_task != NULL) {
+        xTaskNotifyGive(ctx->detection_task);
+    }
+
+    for (int waited_ms = 0; waited_ms < DETECTION_STOP_WAIT_MS; ++waited_ms) {
+        if ((xEventGroupGetBits(ctx->event_group) & DETECTION_FETCH_ACTIVE_BIT) == 0) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    fetch_active = (xEventGroupGetBits(ctx->event_group) & DETECTION_FETCH_ACTIVE_BIT) != 0;
+    if (fetch_active) {
+        ESP_LOGW(TAG, "Wake word fetch still active after %u ms; skip AFE reset", (unsigned)DETECTION_STOP_WAIT_MS);
+    }
+
+    if (ctx->state_lock != NULL && xSemaphoreTake(ctx->state_lock, pdMS_TO_TICKS(DETECTION_STOP_WAIT_MS)) == pdTRUE) {
+        state_locked = true;
+    } else {
+        ESP_LOGW(TAG, "Wake word state lock busy after %u ms; skip AFE reset", (unsigned)DETECTION_STOP_WAIT_MS);
+        ESP_LOGI(TAG, "Wake word detection stopped");
+        return;
+    }
 
     /* Clear input buffer */
     if (ctx->input_buffer != NULL) {
@@ -412,8 +498,12 @@ void hal_wake_word_stop(wake_word_ctx_t *ctx) {
     }
 
     /* Reset AFE buffer */
-    if (ctx->afe_data != NULL && ctx->afe_iface != NULL) {
+    if (!fetch_active && ctx->afe_data != NULL && ctx->afe_iface != NULL) {
         ctx->afe_iface->reset_buffer(ctx->afe_data);
+    }
+
+    if (state_locked) {
+        xSemaphoreGive(ctx->state_lock);
     }
 
     ESP_LOGI(TAG, "Wake word detection stopped");
@@ -470,6 +560,11 @@ void hal_wake_word_deinit(wake_word_ctx_t *ctx) {
     if (ctx->event_group != NULL) {
         vEventGroupDelete(ctx->event_group);
         ctx->event_group = NULL;
+    }
+
+    if (ctx->state_lock != NULL) {
+        vSemaphoreDelete(ctx->state_lock);
+        ctx->state_lock = NULL;
     }
 
     /* Free context */

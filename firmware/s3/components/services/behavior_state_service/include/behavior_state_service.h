@@ -13,16 +13,13 @@ esp_err_t behavior_state_load(void);
 esp_err_t behavior_state_set(const char *state_id);
 esp_err_t behavior_state_set_with_text(const char *state_id, const char *text, int font_size);
 esp_err_t behavior_state_set_with_text_style(const char *state_id, const char *text, int font_size, bool alert_text);
-esp_err_t behavior_state_set_with_resources(const char *state_id,
-                                            const char *text,
-                                            int font_size,
-                                            const char *anim_id,
+/* Resource setter override semantics:
+ * anim_id: NULL uses the state's default animation; "" explicitly keeps the current animation/text-only display.
+ * sound_id: NULL uses the state's default sound timeline; "" explicitly suppresses local SFX for this request. */
+esp_err_t behavior_state_set_with_resources(const char *state_id, const char *text, int font_size, const char *anim_id,
                                             const char *sound_id);
-esp_err_t behavior_state_set_with_resources_and_action(const char *state_id,
-                                                       const char *text,
-                                                       int font_size,
-                                                       const char *anim_id,
-                                                       const char *sound_id,
+esp_err_t behavior_state_set_with_resources_and_action(const char *state_id, const char *text, int font_size,
+                                                       const char *anim_id, const char *sound_id,
                                                        const char *action_id);
 esp_err_t behavior_state_set_text(const char *text, int font_size);
 esp_err_t behavior_state_set_text_style(const char *text, int font_size, bool alert_text);

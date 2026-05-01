@@ -15,6 +15,7 @@
 #include "esp_websocket_client.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -47,11 +48,22 @@ void mem_monitor_snapshot(const char *stage);
 #define WS_BINARY_HEADER_LEN 14
 #define WS_BINARY_MAGIC "WSPK"
 #define WS_DEVICE_ERROR_CODE_GENERIC 1501
+#define WS_TEXT_LOG_MAX_CHARS 256
+#ifdef CONFIG_WATCHER_WS_TEXT_MAX_PAYLOAD_BYTES
+#define WS_TEXT_MAX_PAYLOAD_BYTES CONFIG_WATCHER_WS_TEXT_MAX_PAYLOAD_BYTES
+#else
+#define WS_TEXT_MAX_PAYLOAD_BYTES 8192
+#endif
 #define WS_AUDIO_FRAME_BYTES 1920
 #ifdef CONFIG_WATCHER_WS_AUDIO_QUEUE_DEPTH
 #define WS_AUDIO_QUEUE_DEPTH CONFIG_WATCHER_WS_AUDIO_QUEUE_DEPTH
 #else
 #define WS_AUDIO_QUEUE_DEPTH 4
+#endif
+#ifdef CONFIG_WATCHER_WS_AUDIO_STATS_LOG_INTERVAL_FRAMES
+#define WS_AUDIO_STATS_LOG_INTERVAL_FRAMES CONFIG_WATCHER_WS_AUDIO_STATS_LOG_INTERVAL_FRAMES
+#else
+#define WS_AUDIO_STATS_LOG_INTERVAL_FRAMES 60
 #endif
 #define WS_AUDIO_WORKER_STACK 4096
 #define WS_AUDIO_WORKER_PRIO 6
@@ -63,10 +75,25 @@ void mem_monitor_snapshot(const char *stage);
 #else
 #define WS_TTS_QUEUE_DEPTH 16
 #endif
-#define WS_TTS_WORKER_STACK 4096
+#ifdef CONFIG_WATCHER_WS_TTS_MAX_PAYLOAD_BYTES
+#define WS_TTS_MAX_PAYLOAD_BYTES CONFIG_WATCHER_WS_TTS_MAX_PAYLOAD_BYTES
+#else
+#define WS_TTS_MAX_PAYLOAD_BYTES 32768
+#endif
+#ifdef CONFIG_WATCHER_WS_TTS_RX_LOG_INTERVAL_FRAMES
+#define WS_TTS_RX_LOG_INTERVAL_FRAMES CONFIG_WATCHER_WS_TTS_RX_LOG_INTERVAL_FRAMES
+#else
+#define WS_TTS_RX_LOG_INTERVAL_FRAMES 12
+#endif
+#define WS_TTS_WORKER_STACK 6144
 #define WS_TTS_WORKER_PRIO 7
 #define WS_TTS_WORKER_WAIT_MS 20
 #define WS_TTS_START_BUFFER_FRAMES 2U
+#ifdef CONFIG_WATCHER_WS_TTS_ENQUEUE_TIMEOUT_MS
+#define WS_TTS_ENQUEUE_TIMEOUT_MS CONFIG_WATCHER_WS_TTS_ENQUEUE_TIMEOUT_MS
+#else
+#define WS_TTS_ENQUEUE_TIMEOUT_MS 1500
+#endif
 #define WS_HELLO_UI_MIN_INTERNAL_FREE_BYTES (24U * 1024U)
 #define WS_HELLO_UI_MIN_INTERNAL_LARGEST_BYTES (12U * 1024U)
 
@@ -124,14 +151,25 @@ static SemaphoreHandle_t s_tts_queue_lock = NULL;
 static TaskHandle_t s_tts_worker_task = NULL;
 static volatile bool s_tts_worker_running = false;
 static bool s_tts_end_pending = false;
+static bool s_tts_session_stats_active = false;
+static uint64_t s_tts_inbound_bytes = 0;
+static uint64_t s_tts_enqueue_wait_total_ms = 0;
+static uint32_t s_tts_enqueued_frames = 0;
+static uint32_t s_tts_played_frames = 0;
 static uint32_t s_tts_dropped_frames = 0;
+static uint32_t s_tts_drop_timeout_frames = 0;
 static uint32_t s_tts_high_watermark = 0;
+static uint32_t s_tts_enqueue_wait_events = 0;
+static uint32_t s_tts_enqueue_wait_max_ms = 0;
+static uint32_t s_tts_rx_frames = 0;
+static uint32_t s_tts_rx_suppressed_logs = 0;
 
 typedef struct {
     char *buffer;
     size_t total_len;
     size_t received_len;
     bool active;
+    bool dropping;
 } ws_text_fragment_state_t;
 
 typedef struct {
@@ -170,6 +208,9 @@ static bool ws_client_has_hello_ui_headroom(void);
 static esp_err_t ws_tts_runtime_init(void);
 static void ws_tts_queue_reset_locked(void);
 static void ws_tts_worker_task(void *arg);
+static bool ws_tts_take_free_slot(uint8_t *slot_idx, uint32_t *waited_ms, uint32_t timeout_ms);
+static void ws_tts_record_enqueue_wait_locked(uint32_t waited_ms);
+static void ws_tts_log_session_stats(const char *reason);
 static void ws_finish_tts_playback(void);
 static bool ws_prepare_tts_playback(bool recovering_existing_stream);
 
@@ -208,6 +249,30 @@ static bool ws_client_has_hello_ui_headroom(void) {
            largest_internal >= WS_HELLO_UI_MIN_INTERNAL_LARGEST_BYTES;
 }
 
+static bool ws_should_log_tts_rx_frame(uint8_t flags) {
+    if ((flags & WS_FRAME_FLAG_FIRST) != 0U) {
+        s_tts_rx_frames = 0;
+        s_tts_rx_suppressed_logs = 0;
+        s_tts_dropped_frames = 0;
+        s_tts_high_watermark = 0;
+    }
+
+    s_tts_rx_frames++;
+
+    if ((flags & (WS_FRAME_FLAG_FIRST | WS_FRAME_FLAG_LAST)) != 0U) {
+        return true;
+    }
+
+#if WS_TTS_RX_LOG_INTERVAL_FRAMES > 0
+    if ((s_tts_rx_frames % WS_TTS_RX_LOG_INTERVAL_FRAMES) == 0U) {
+        return true;
+    }
+#endif
+
+    s_tts_rx_suppressed_logs++;
+    return false;
+}
+
 static void ws_tts_queue_reset_locked(void) {
     uint8_t slot_idx;
 
@@ -222,8 +287,135 @@ static void ws_tts_queue_reset_locked(void) {
     }
 
     s_tts_end_pending = false;
+    s_tts_session_stats_active = false;
+    s_tts_inbound_bytes = 0;
+    s_tts_enqueue_wait_total_ms = 0;
+    s_tts_enqueued_frames = 0;
+    s_tts_played_frames = 0;
     s_tts_dropped_frames = 0;
+    s_tts_drop_timeout_frames = 0;
     s_tts_high_watermark = 0;
+    s_tts_enqueue_wait_events = 0;
+    s_tts_enqueue_wait_max_ms = 0;
+    s_tts_rx_frames = 0;
+    s_tts_rx_suppressed_logs = 0;
+}
+
+static void ws_tts_record_enqueue_wait_locked(uint32_t waited_ms) {
+    if (waited_ms == 0U) {
+        return;
+    }
+
+    s_tts_enqueue_wait_events++;
+    s_tts_enqueue_wait_total_ms += waited_ms;
+    if (waited_ms > s_tts_enqueue_wait_max_ms) {
+        s_tts_enqueue_wait_max_ms = waited_ms;
+    }
+}
+
+static bool ws_tts_take_free_slot(uint8_t *slot_idx, uint32_t *waited_ms, uint32_t timeout_ms) {
+    TickType_t start_ticks;
+    TickType_t timeout_ticks;
+    TickType_t poll_ticks;
+
+    if (slot_idx == NULL || waited_ms == NULL || s_tts_queue_lock == NULL || s_tts_free_slots == NULL) {
+        return false;
+    }
+
+    start_ticks = xTaskGetTickCount();
+    timeout_ticks = pdMS_TO_TICKS(timeout_ms);
+    poll_ticks = pdMS_TO_TICKS(WS_TTS_WORKER_WAIT_MS);
+    if (poll_ticks == 0) {
+        poll_ticks = 1;
+    }
+
+    while (true) {
+        TickType_t elapsed_ticks;
+
+        TickType_t wait_ticks = 0;
+
+        if (timeout_ticks > 0) {
+            elapsed_ticks = xTaskGetTickCount() - start_ticks;
+            if (elapsed_ticks >= timeout_ticks) {
+                *waited_ms = (uint32_t)(elapsed_ticks * portTICK_PERIOD_MS);
+                return false;
+            }
+            wait_ticks = timeout_ticks - elapsed_ticks;
+            if (wait_ticks > poll_ticks) {
+                wait_ticks = poll_ticks;
+            }
+        }
+
+        if (xSemaphoreTake(s_tts_queue_lock, wait_ticks) == pdTRUE) {
+            if (xQueueReceive(s_tts_free_slots, slot_idx, 0) == pdTRUE) {
+                elapsed_ticks = xTaskGetTickCount() - start_ticks;
+                *waited_ms = (uint32_t)(elapsed_ticks * portTICK_PERIOD_MS);
+                /* Keep the queue lock held so reset/abort cannot reclaim this reserved slot before enqueue. */
+                return true;
+            }
+            xSemaphoreGive(s_tts_queue_lock);
+        }
+
+        elapsed_ticks = xTaskGetTickCount() - start_ticks;
+        if (elapsed_ticks >= timeout_ticks) {
+            *waited_ms = (uint32_t)(elapsed_ticks * portTICK_PERIOD_MS);
+            return false;
+        }
+
+        if (timeout_ticks == 0) {
+            *waited_ms = 0;
+            return false;
+        }
+
+        {
+            TickType_t delay_ticks = timeout_ticks - elapsed_ticks;
+            if (delay_ticks > poll_ticks) {
+                delay_ticks = poll_ticks;
+            }
+            vTaskDelay(delay_ticks);
+        }
+    }
+}
+
+static void ws_tts_log_session_stats(const char *reason) {
+    uint64_t inbound_bytes;
+    uint64_t wait_total_ms;
+    uint32_t enqueued_frames;
+    uint32_t played_frames;
+    uint32_t dropped_frames;
+    uint32_t drop_timeout_frames;
+    uint32_t high_watermark;
+    uint32_t wait_events;
+    uint32_t wait_max_ms;
+
+    if (s_tts_queue_lock == NULL || xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(50)) != pdTRUE) {
+        return;
+    }
+
+    if (!s_tts_session_stats_active) {
+        xSemaphoreGive(s_tts_queue_lock);
+        return;
+    }
+
+    inbound_bytes = s_tts_inbound_bytes;
+    wait_total_ms = s_tts_enqueue_wait_total_ms;
+    enqueued_frames = s_tts_enqueued_frames;
+    played_frames = s_tts_played_frames;
+    dropped_frames = s_tts_dropped_frames;
+    drop_timeout_frames = s_tts_drop_timeout_frames;
+    high_watermark = s_tts_high_watermark;
+    wait_events = s_tts_enqueue_wait_events;
+    wait_max_ms = s_tts_enqueue_wait_max_ms;
+    s_tts_session_stats_active = false;
+    xSemaphoreGive(s_tts_queue_lock);
+
+    ESP_LOGI(TAG,
+             "TTS session %s: inbound_bytes=%llu enqueued_frames=%lu played_frames=%lu dropped_frames=%lu "
+             "drop_timeout=%lu high=%lu enqueue_wait_events=%lu enqueue_wait_total_ms=%llu "
+             "enqueue_wait_max_ms=%lu",
+             reason, (unsigned long long)inbound_bytes, (unsigned long)enqueued_frames, (unsigned long)played_frames,
+             (unsigned long)dropped_frames, (unsigned long)drop_timeout_frames, (unsigned long)high_watermark,
+             (unsigned long)wait_events, (unsigned long long)wait_total_ms, (unsigned long)wait_max_ms);
 }
 
 static esp_err_t ws_tts_runtime_init(void) {
@@ -258,8 +450,9 @@ static esp_err_t ws_tts_runtime_init(void) {
 
     if (s_tts_worker_task == NULL) {
         s_tts_worker_running = true;
-        if (xTaskCreate(ws_tts_worker_task, "ws_tts_play", WS_TTS_WORKER_STACK, NULL, WS_TTS_WORKER_PRIO,
-                        &s_tts_worker_task) != pdPASS) {
+        BaseType_t task_ret = xTaskCreate(ws_tts_worker_task, "ws_tts_play", WS_TTS_WORKER_STACK, NULL,
+                                          WS_TTS_WORKER_PRIO, &s_tts_worker_task);
+        if (task_ret != pdPASS) {
             s_tts_worker_running = false;
             ESP_LOGE(TAG, "failed to create tts playback worker");
             return ESP_FAIL;
@@ -363,8 +556,19 @@ static esp_err_t ws_audio_queue_init(void) {
 
     if (s_audio_worker_task == NULL) {
         s_audio_worker_running = true;
-        BaseType_t task_ret = xTaskCreate(ws_audio_worker_task, "ws_audio_send", WS_AUDIO_WORKER_STACK, NULL,
-                                          WS_AUDIO_WORKER_PRIO, &s_audio_worker_task);
+        BaseType_t task_ret;
+#ifdef CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY
+        task_ret = xTaskCreateWithCaps(ws_audio_worker_task, "ws_audio_send", WS_AUDIO_WORKER_STACK, NULL,
+                                       WS_AUDIO_WORKER_PRIO, &s_audio_worker_task, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (task_ret != pdPASS) {
+            ESP_LOGW(TAG, "failed to create audio worker in PSRAM, retrying internal RAM");
+            task_ret = xTaskCreate(ws_audio_worker_task, "ws_audio_send", WS_AUDIO_WORKER_STACK, NULL,
+                                   WS_AUDIO_WORKER_PRIO, &s_audio_worker_task);
+        }
+#else
+        task_ret = xTaskCreate(ws_audio_worker_task, "ws_audio_send", WS_AUDIO_WORKER_STACK, NULL, WS_AUDIO_WORKER_PRIO,
+                               &s_audio_worker_task);
+#endif
         if (task_ret != pdPASS) {
             s_audio_worker_running = false;
             ESP_LOGE(TAG, "failed to create audio worker task");
@@ -453,19 +657,19 @@ static void ws_audio_worker_task(void *arg) {
                     xSemaphoreGive(s_audio_state_lock);
                 }
 
-                if (send_ret == 0 && s_audio_sent_frames % 30U == 0U) {
+                if (send_ret == 0 && WS_AUDIO_STATS_LOG_INTERVAL_FRAMES > 0 &&
+                    s_audio_sent_frames % WS_AUDIO_STATS_LOG_INTERVAL_FRAMES == 0U) {
                     ws_client_media_send_stats_t send_stats = {0};
                     ws_client_get_media_send_stats(&send_stats);
                     ESP_LOGI(TAG,
-                             "audio send latest_us{queue=%lu total=%lu lock=%lu send=%lu payload=%u packet=%u} "
-                             "queue{pending=%u high=%u queued=%lu sent=%lu dropped=%lu delay=%lu}",
-                             (unsigned long)s_audio_last_queue_delay_us, (unsigned long)send_stats.total_us,
-                             (unsigned long)send_stats.lock_wait_us, (unsigned long)send_stats.send_us,
-                             (unsigned int)send_stats.payload_len, (unsigned int)send_stats.packet_len,
+                             "audio_send sent=%lu queued=%lu drop=%lu pending=%u high=%u delay_us=%lu send_us=%lu/%lu "
+                             "packet=%u",
+                             (unsigned long)s_audio_sent_frames, (unsigned long)s_audio_queued_frames,
+                             (unsigned long)s_audio_dropped_frames,
                              (unsigned int)s_last_audio_queue_stats.pending_frames,
                              (unsigned int)s_last_audio_queue_stats.high_watermark,
-                             (unsigned long)s_audio_queued_frames, (unsigned long)s_audio_sent_frames,
-                             (unsigned long)s_audio_dropped_frames, (unsigned long)s_audio_last_queue_delay_us);
+                             (unsigned long)s_audio_last_queue_delay_us, (unsigned long)send_stats.send_us,
+                             (unsigned long)send_stats.total_us, (unsigned int)send_stats.packet_len);
                 }
             } else if (s_audio_state_lock != NULL && xSemaphoreTake(s_audio_state_lock, portMAX_DELAY) == pdTRUE) {
                 s_audio_dropped_frames++;
@@ -636,6 +840,7 @@ static void ws_tts_worker_task(void *arg) {
 
             if (s_tts_queue_lock != NULL &&
                 xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(WS_TTS_WORKER_WAIT_MS)) == pdTRUE) {
+                s_tts_played_frames++;
                 if (s_tts_free_slots != NULL) {
                     (void)xQueueSendToBack(s_tts_free_slots, &slot_idx, 0);
                 }
@@ -765,7 +970,7 @@ static bool ws_prepare_tts_playback(bool recovering_existing_stream) {
 
     if (!s_tts_playing) {
         s_tts_playing = true;
-        behavior_state_set("speaking");
+        behavior_state_set_with_resources("speaking", NULL, 0, NULL, "");
     }
 
     return true;
@@ -773,6 +978,8 @@ static bool ws_prepare_tts_playback(bool recovering_existing_stream) {
 
 static void ws_abort_tts_playback(void) {
     s_waiting_for_response = false;
+
+    ws_tts_log_session_stats("aborted");
 
     if (s_tts_queue_lock != NULL && xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
         ws_tts_queue_reset_locked();
@@ -795,13 +1002,15 @@ static void ws_abort_tts_playback(void) {
 static void ws_finish_tts_playback(void) {
     s_waiting_for_response = false;
 
+    ws_tts_log_session_stats("complete");
+
     if (s_tts_playing) {
         ESP_LOGI(TAG, "TTS playback complete");
         vTaskDelay(pdMS_TO_TICKS(500));
         hal_audio_set_playback_mode(false);
         hal_audio_stop();
         vTaskDelay(pdMS_TO_TICKS(1000));
-        behavior_state_set("happy");
+        behavior_state_set_with_resources("happy", NULL, 0, NULL, "");
         s_tts_playing = false;
     }
 
@@ -1017,7 +1226,13 @@ static void ws_handle_text_message(const char *msg) {
         return;
     }
 
-    ESP_LOGI(TAG, "WS received: %s", msg);
+    size_t msg_len = strlen(msg);
+    if (msg_len > WS_TEXT_LOG_MAX_CHARS) {
+        ESP_LOGI(TAG, "WS received len=%u head=\"%.*s\"", (unsigned int)msg_len, WS_TEXT_LOG_MAX_CHARS, msg);
+    } else {
+        ESP_LOGI(TAG, "WS received: %s", msg);
+    }
+
     msg_type = ws_route_message(msg);
     switch (msg_type) {
     case WS_MSG_SYS_ACK:
@@ -1056,14 +1271,23 @@ static void ws_handle_text_frame(const esp_websocket_event_data_t *data) {
                 return;
             }
 
-            s_text_fragment_state.buffer = (char *)calloc(total_len + 1U, 1U);
-            if (s_text_fragment_state.buffer == NULL) {
-                ESP_LOGE(TAG, "fragmented text frame alloc failed: %u", (unsigned int)total_len);
-                return;
-            }
+            if (total_len > WS_TEXT_MAX_PAYLOAD_BYTES) {
+                ESP_LOGW(TAG, "dropping oversized fragmented text frame: len=%u max=%u", (unsigned int)total_len,
+                         (unsigned int)WS_TEXT_MAX_PAYLOAD_BYTES);
+                ws_send_device_error(WS_DEVICE_ERROR_CODE_GENERIC, "text_payload_too_large");
+                s_text_fragment_state.active = true;
+                s_text_fragment_state.dropping = true;
+                s_text_fragment_state.total_len = total_len;
+            } else {
+                s_text_fragment_state.buffer = (char *)calloc(total_len + 1U, 1U);
+                if (s_text_fragment_state.buffer == NULL) {
+                    ESP_LOGE(TAG, "fragmented text frame alloc failed: %u", (unsigned int)total_len);
+                    return;
+                }
 
-            s_text_fragment_state.active = true;
-            s_text_fragment_state.total_len = total_len;
+                s_text_fragment_state.active = true;
+                s_text_fragment_state.total_len = total_len;
+            }
         } else if (!s_text_fragment_state.active || s_text_fragment_state.total_len != total_len) {
             ESP_LOGW(TAG, "fragmented text frame state mismatch: offset=%d chunk=%d total=%d", data->payload_offset,
                      data->data_len, data->payload_len);
@@ -1080,6 +1304,14 @@ static void ws_handle_text_frame(const esp_websocket_event_data_t *data) {
             return;
         }
 
+        if (s_text_fragment_state.dropping) {
+            s_text_fragment_state.received_len = chunk_end;
+            if (s_text_fragment_state.received_len >= s_text_fragment_state.total_len) {
+                ws_reset_text_fragment_state();
+            }
+            return;
+        }
+
         memcpy(s_text_fragment_state.buffer + data->payload_offset, data->data_ptr, chunk_len);
         s_text_fragment_state.received_len = chunk_end;
         if (s_text_fragment_state.received_len < s_text_fragment_state.total_len) {
@@ -1089,6 +1321,13 @@ static void ws_handle_text_frame(const esp_websocket_event_data_t *data) {
         s_text_fragment_state.buffer[s_text_fragment_state.total_len] = '\0';
         ws_handle_text_message(s_text_fragment_state.buffer);
         ws_reset_text_fragment_state();
+        return;
+    }
+
+    if ((size_t)data->data_len > WS_TEXT_MAX_PAYLOAD_BYTES) {
+        ESP_LOGW(TAG, "dropping oversized text frame: len=%d max=%u", data->data_len,
+                 (unsigned int)WS_TEXT_MAX_PAYLOAD_BYTES);
+        ws_send_device_error(WS_DEVICE_ERROR_CODE_GENERIC, "text_payload_too_large");
         return;
     }
 
@@ -1147,6 +1386,16 @@ static bool ws_parse_binary_frame(const uint8_t *frame, size_t frame_len, uint8_
 static void ws_dispatch_binary_frame(uint8_t frame_type, uint8_t flags, const uint8_t *payload, size_t payload_len) {
     switch (frame_type) {
     case WS_FRAME_TYPE_AUDIO:
+        if (payload_len > WS_TTS_MAX_PAYLOAD_BYTES) {
+            ESP_LOGW(TAG, "dropping oversized tts frame: payload=%u max=%u flags=0x%02x", (unsigned int)payload_len,
+                     (unsigned int)WS_TTS_MAX_PAYLOAD_BYTES, flags);
+            ws_send_device_error(WS_DEVICE_ERROR_CODE_GENERIC, "tts_payload_too_large");
+            ws_client_mark_server_response();
+            if ((flags & WS_FRAME_FLAG_LAST) != 0U) {
+                ws_tts_complete();
+            }
+            break;
+        }
         if (payload_len > 0U) {
             ws_handle_tts_binary(payload, (int)payload_len);
         }
@@ -1236,9 +1485,30 @@ static void ws_handle_binary_frame(const esp_websocket_event_data_t *data) {
 
                 s_binary_fragment_state.header_parsed = true;
                 if (s_binary_fragment_state.frame_type == WS_FRAME_TYPE_AUDIO) {
-                    ESP_LOGI(TAG, "streaming fragmented audio frame: payload=%u total=%u flags=0x%02x",
-                             (unsigned int)s_binary_fragment_state.payload_len,
-                             (unsigned int)s_binary_fragment_state.total_len, s_binary_fragment_state.flags);
+                    if (s_binary_fragment_state.payload_len > WS_TTS_MAX_PAYLOAD_BYTES) {
+                        ESP_LOGW(TAG, "dropping oversized fragmented tts frame: payload=%u max=%u flags=0x%02x",
+                                 (unsigned int)s_binary_fragment_state.payload_len,
+                                 (unsigned int)WS_TTS_MAX_PAYLOAD_BYTES, s_binary_fragment_state.flags);
+                        ws_send_device_error(WS_DEVICE_ERROR_CODE_GENERIC, "tts_payload_too_large");
+                        ws_client_mark_server_response();
+                        ws_reset_binary_fragment_state();
+                        return;
+                    }
+                    if (ws_should_log_tts_rx_frame(s_binary_fragment_state.flags)) {
+                        uint32_t pending = 0U;
+                        if (s_tts_pending_slots != NULL) {
+                            pending = (uint32_t)uxQueueMessagesWaiting(s_tts_pending_slots);
+                        }
+                        ESP_LOGI(TAG,
+                                 "streaming fragmented audio frame: payload=%u chunks=%u flags=0x%02x rx=%lu "
+                                 "suppressed=%lu pending=%u high=%lu dropped=%lu",
+                                 (unsigned int)s_binary_fragment_state.payload_len,
+                                 (unsigned int)((s_binary_fragment_state.payload_len + WS_TTS_FRAME_BYTES - 1U) /
+                                                WS_TTS_FRAME_BYTES),
+                                 s_binary_fragment_state.flags, (unsigned long)s_tts_rx_frames,
+                                 (unsigned long)s_tts_rx_suppressed_logs, (unsigned int)pending,
+                                 (unsigned long)s_tts_high_watermark, (unsigned long)s_tts_dropped_frames);
+                    }
                     ws_client_mark_server_response();
                 } else if (s_binary_fragment_state.payload_len > 0U) {
                     s_binary_fragment_state.payload_buffer = (uint8_t *)malloc(s_binary_fragment_state.payload_len);
@@ -1564,7 +1834,7 @@ void ws_client_mark_hello_acked(void) {
 
     s_hello_acknowledged = true;
     if (ws_client_has_hello_ui_headroom()) {
-        behavior_state_set("happy");
+        behavior_state_set_with_resources("happy", NULL, 0, NULL, "");
     } else {
         size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -1902,62 +2172,97 @@ void ws_client_get_audio_queue_stats(ws_client_audio_queue_stats_t *stats) {
 
 void ws_handle_tts_binary(const uint8_t *data, int len) {
     int offset = 0;
+    uint32_t remaining_wait_ms = WS_TTS_ENQUEUE_TIMEOUT_MS;
 
     if (data == NULL || len <= 0) {
         return;
     }
 
-    if (ws_tts_runtime_init() != ESP_OK) {
-        int written;
-
-        if (!s_tts_playing || !hal_audio_is_running() || !hal_audio_is_playback_mode()) {
-            if (!ws_prepare_tts_playback(s_tts_playing)) {
-                return;
-            }
-        }
-
-        written = hal_audio_write(data, len);
-        if (written < 0 && (!hal_audio_is_running() || !hal_audio_is_playback_mode())) {
-            if (ws_prepare_tts_playback(true)) {
-                written = hal_audio_write(data, len);
-            }
-        }
-
-        if (written != len) {
-            ESP_LOGW(TAG, "TTS playback incomplete: %d/%d", written, len);
-        }
+    if (len > WS_TTS_MAX_PAYLOAD_BYTES) {
+        ESP_LOGW(TAG, "dropping oversized tts payload: len=%d max=%u", len, (unsigned int)WS_TTS_MAX_PAYLOAD_BYTES);
+        ws_send_device_error(WS_DEVICE_ERROR_CODE_GENERIC, "tts_payload_too_large");
         return;
     }
+
+    if (ws_tts_runtime_init() != ESP_OK) {
+        ESP_LOGW(TAG, "dropping tts payload: playback runtime unavailable len=%d", len);
+        ws_send_device_error(WS_DEVICE_ERROR_CODE_GENERIC, "tts_runtime_unavailable");
+        return;
+    }
+
+    if (len > WS_TTS_FRAME_BYTES) {
+        ESP_LOGI(TAG, "tts payload split: len=%d chunks=%u slot=%u pending=%u high=%lu dropped=%lu", len,
+                 (unsigned int)((len + WS_TTS_FRAME_BYTES - 1) / WS_TTS_FRAME_BYTES), (unsigned int)WS_TTS_FRAME_BYTES,
+                 (unsigned int)(s_tts_pending_slots != NULL ? uxQueueMessagesWaiting(s_tts_pending_slots) : 0U),
+                 (unsigned long)s_tts_high_watermark, (unsigned long)s_tts_dropped_frames);
+    }
+
+    if (s_tts_queue_lock == NULL || xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(50)) != pdTRUE) {
+        return;
+    }
+    if (!s_tts_session_stats_active) {
+        s_tts_session_stats_active = true;
+        s_tts_inbound_bytes = 0;
+        s_tts_enqueue_wait_total_ms = 0;
+        s_tts_enqueued_frames = 0;
+        s_tts_played_frames = 0;
+        s_tts_dropped_frames = 0;
+        s_tts_drop_timeout_frames = 0;
+        s_tts_high_watermark = 0;
+        s_tts_enqueue_wait_events = 0;
+        s_tts_enqueue_wait_max_ms = 0;
+    }
+    s_tts_inbound_bytes += (uint64_t)len;
+    xSemaphoreGive(s_tts_queue_lock);
 
     while (offset < len) {
         uint8_t slot_idx = 0;
         int chunk_len = len - offset;
-        bool reclaimed_oldest = false;
+        uint32_t waited_ms = 0;
 
         if (chunk_len > WS_TTS_FRAME_BYTES) {
             chunk_len = WS_TTS_FRAME_BYTES;
         }
 
-        if (s_tts_queue_lock == NULL || xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(50)) != pdTRUE) {
-            return;
-        }
+        if (!ws_tts_take_free_slot(&slot_idx, &waited_ms, remaining_wait_ms)) {
+            uint32_t pending = 0;
+            uint32_t high = 0;
+            uint32_t dropped = 0;
+            uint32_t drop_timeout = 0;
+            uint64_t inbound_bytes = 0;
+            uint32_t played_frames = 0;
 
-        if (uxQueueMessagesWaiting(s_tts_free_slots) == 0U) {
-            if (uxQueueMessagesWaiting(s_tts_pending_slots) > 0U &&
-                xQueueReceive(s_tts_pending_slots, &slot_idx, 0) == pdTRUE) {
-                reclaimed_oldest = true;
+            if (s_tts_queue_lock != NULL && xSemaphoreTake(s_tts_queue_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
+                ws_tts_record_enqueue_wait_locked(waited_ms);
                 s_tts_dropped_frames++;
-            } else {
-                s_tts_dropped_frames++;
+                s_tts_drop_timeout_frames++;
+                if (s_tts_pending_slots != NULL) {
+                    pending = (uint32_t)uxQueueMessagesWaiting(s_tts_pending_slots);
+                }
+                high = s_tts_high_watermark;
+                dropped = s_tts_dropped_frames;
+                drop_timeout = s_tts_drop_timeout_frames;
+                inbound_bytes = s_tts_inbound_bytes;
+                played_frames = s_tts_played_frames;
                 xSemaphoreGive(s_tts_queue_lock);
-                return;
             }
-        } else if (xQueueReceive(s_tts_free_slots, &slot_idx, 0) != pdTRUE) {
-            s_tts_dropped_frames++;
-            xSemaphoreGive(s_tts_queue_lock);
+
+            ESP_LOGE(
+                TAG,
+                "tts enqueue timeout: waited_ms=%lu budget_ms=%lu pending=%lu high=%lu dropped=%lu drop_timeout=%lu "
+                "inbound_bytes=%llu played_frames=%lu",
+                (unsigned long)waited_ms, (unsigned long)remaining_wait_ms, (unsigned long)pending, (unsigned long)high,
+                (unsigned long)dropped, (unsigned long)drop_timeout, (unsigned long long)inbound_bytes,
+                (unsigned long)played_frames);
             return;
         }
 
+        ws_tts_record_enqueue_wait_locked(waited_ms);
+        if (waited_ms >= remaining_wait_ms) {
+            remaining_wait_ms = 0;
+        } else {
+            remaining_wait_ms -= waited_ms;
+        }
         memcpy(s_tts_frame_pool[slot_idx].data, data + offset, (size_t)chunk_len);
         s_tts_frame_pool[slot_idx].len = (uint16_t)chunk_len;
         s_tts_frame_pool[slot_idx].enqueued_us = (uint64_t)esp_timer_get_time();
@@ -1969,6 +2274,7 @@ void ws_handle_tts_binary(const uint8_t *data, int len) {
             return;
         }
 
+        s_tts_enqueued_frames++;
         {
             uint32_t pending = (uint32_t)uxQueueMessagesWaiting(s_tts_pending_slots);
             if (pending > s_tts_high_watermark) {
@@ -1978,9 +2284,9 @@ void ws_handle_tts_binary(const uint8_t *data, int len) {
 
         xSemaphoreGive(s_tts_queue_lock);
 
-        if (reclaimed_oldest && (s_tts_dropped_frames % 10U) == 1U) {
-            ESP_LOGW(TAG, "tts playback queue pressure: dropped=%lu high=%lu", (unsigned long)s_tts_dropped_frames,
-                     (unsigned long)s_tts_high_watermark);
+        if (waited_ms >= WS_TTS_WORKER_WAIT_MS) {
+            ESP_LOGD(TAG, "tts enqueue backpressure: waited_ms=%lu timeout_ms=%lu", (unsigned long)waited_ms,
+                     (unsigned long)WS_TTS_ENQUEUE_TIMEOUT_MS);
         }
 
         offset += chunk_len;

@@ -16,6 +16,9 @@
 
 推荐使用 Codex skill `embedded-pr-robustness-review` 执行这一步。
 
+唤醒词、WebSocket TTS、行为状态和音频/显示内存相关改动，还应同步检查
+[`WAKE_WORD_TTS_MEMORY_NOTES.md`](WAKE_WORD_TTS_MEMORY_NOTES.md) 中的内存护栏和回归清单。
+
 ### Skill 触发条件
 
 当用户请求对嵌入式固件 PR 做 merge 前代码质量或鲁棒性 review 时，应使用 `embedded-pr-robustness-review` skill。

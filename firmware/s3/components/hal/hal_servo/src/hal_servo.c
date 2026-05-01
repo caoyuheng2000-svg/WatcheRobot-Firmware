@@ -23,6 +23,7 @@ static bool s_initialized = false;
 static SemaphoreHandle_t s_angle_mutex = NULL;
 static int s_angle[2] = {SERVO_X_DEFAULT_DEG, SERVO_Y_DEFAULT_DEG};
 
+#if CONFIG_WATCHER_SERVO_MOTION_ENABLE
 static mcu_motion_source_t servo_source_to_mcu(hal_servo_motion_source_t source) {
     switch (source) {
     case HAL_SERVO_MOTION_SOURCE_BEHAVIOR:
@@ -38,6 +39,7 @@ static mcu_motion_source_t servo_source_to_mcu(hal_servo_motion_source_t source)
         return MCU_MOTION_SOURCE_UNKNOWN;
     }
 }
+#endif
 
 static int servo_clamp_angle(servo_axis_t axis, int angle_deg) {
     if (angle_deg < 0) {
@@ -59,6 +61,7 @@ static int servo_clamp_angle(servo_axis_t axis, int angle_deg) {
     return angle_deg;
 }
 
+#if CONFIG_WATCHER_SERVO_MOTION_ENABLE
 static esp_err_t servo_build_motion_request(uint8_t axis_mask, int x_deg, int y_deg, int duration_ms,
                                             hal_servo_motion_source_t source, mcu_motion_request_t *out_request) {
     if (out_request == NULL) {
@@ -82,6 +85,7 @@ static esp_err_t servo_build_motion_request(uint8_t axis_mask, int x_deg, int y_
     out_request->source = servo_source_to_mcu(source);
     return ESP_OK;
 }
+#endif
 
 static void servo_cache_angle(servo_axis_t axis, int angle_deg) {
     if (s_angle_mutex == NULL) {
@@ -107,7 +111,9 @@ static void servo_cache_sync_angles(int x_deg, int y_deg) {
 }
 
 esp_err_t hal_servo_init(void) {
+#if CONFIG_WATCHER_SERVO_MOTION_ENABLE
     esp_err_t ret;
+#endif
 
     if (s_initialized) {
         return ESP_OK;
@@ -119,6 +125,7 @@ esp_err_t hal_servo_init(void) {
         return ESP_FAIL;
     }
 
+#if CONFIG_WATCHER_SERVO_MOTION_ENABLE
     ret = mcu_motion_service_init();
     if (ret != ESP_OK) {
         vSemaphoreDelete(s_angle_mutex);
@@ -126,9 +133,14 @@ esp_err_t hal_servo_init(void) {
         ESP_LOGE(TAG, "MCU motion service init failed: %s", esp_err_to_name(ret));
         return ret;
     }
+#endif
 
     s_initialized = true;
+#if CONFIG_WATCHER_SERVO_MOTION_ENABLE
     ESP_LOGI(TAG, "Servo HAL initialized in coprocessor facade mode; GPIO19/GPIO20 are reserved for mcu_link UART");
+#else
+    ESP_LOGI(TAG, "Servo HAL initialized with motion output disabled");
+#endif
     return ESP_OK;
 }
 
@@ -148,9 +160,14 @@ esp_err_t hal_servo_move_smooth_with_source(servo_axis_t axis, int angle_deg, in
 
 esp_err_t hal_servo_move_smooth_with_source_and_seq(servo_axis_t axis, int angle_deg, int duration_ms,
                                                     hal_servo_motion_source_t source, uint32_t *out_seq) {
+#if CONFIG_WATCHER_SERVO_MOTION_ENABLE
     mcu_motion_request_t request;
     esp_err_t ret;
+#endif
     int clamped_angle;
+
+    (void)duration_ms;
+    (void)source;
 
     if (!s_initialized) {
         return ESP_ERR_INVALID_STATE;
@@ -165,6 +182,7 @@ esp_err_t hal_servo_move_smooth_with_source_and_seq(servo_axis_t axis, int angle
     }
 
     clamped_angle = servo_clamp_angle(axis, angle_deg);
+#if CONFIG_WATCHER_SERVO_MOTION_ENABLE
     ret = servo_build_motion_request(axis == SERVO_AXIS_X ? MCU_MOTION_AXIS_X : MCU_MOTION_AXIS_Y,
                                      axis == SERVO_AXIS_X ? clamped_angle : 0, axis == SERVO_AXIS_Y ? clamped_angle : 0,
                                      duration_ms, source, &request);
@@ -184,6 +202,13 @@ esp_err_t hal_servo_move_smooth_with_source_and_seq(servo_axis_t axis, int angle
     ESP_LOGI(TAG, "Queued servo motion via coprocessor: axis=%s angle=%d duration_ms=%u source=%d",
              axis == SERVO_AXIS_X ? "X" : "Y", clamped_angle, (unsigned)request.duration_ms, (int)source);
 #endif
+#else
+    if (out_seq != NULL) {
+        *out_seq = 0;
+    }
+    servo_cache_angle(axis, clamped_angle);
+    ESP_LOGD(TAG, "Servo motion disabled; cached axis=%s angle=%d", axis == SERVO_AXIS_X ? "X" : "Y", clamped_angle);
+#endif
     return ESP_OK;
 }
 
@@ -197,10 +222,15 @@ esp_err_t hal_servo_move_sync_with_source(int x_deg, int y_deg, int duration_ms,
 
 esp_err_t hal_servo_move_sync_with_source_and_seq(int x_deg, int y_deg, int duration_ms,
                                                   hal_servo_motion_source_t source, uint32_t *out_seq) {
+#if CONFIG_WATCHER_SERVO_MOTION_ENABLE
     mcu_motion_request_t request;
     esp_err_t ret;
+#endif
     int clamped_x;
     int clamped_y;
+
+    (void)duration_ms;
+    (void)source;
 
     if (!s_initialized) {
         return ESP_ERR_INVALID_STATE;
@@ -213,6 +243,7 @@ esp_err_t hal_servo_move_sync_with_source_and_seq(int x_deg, int y_deg, int dura
     clamped_x = servo_clamp_angle(SERVO_AXIS_X, x_deg);
     clamped_y = servo_clamp_angle(SERVO_AXIS_Y, y_deg);
 
+#if CONFIG_WATCHER_SERVO_MOTION_ENABLE
     ret = servo_build_motion_request(MCU_MOTION_AXIS_X | MCU_MOTION_AXIS_Y, clamped_x, clamped_y, duration_ms, source,
                                      &request);
     if (ret != ESP_OK) {
@@ -230,6 +261,13 @@ esp_err_t hal_servo_move_sync_with_source_and_seq(int x_deg, int y_deg, int dura
 #if !defined(WATCHER_STRESS_BUILD) && !defined(CONFIG_WATCHER_STRESS_BUILD)
     ESP_LOGI(TAG, "Queued sync servo motion via coprocessor: x=%d y=%d duration_ms=%u source=%d", clamped_x, clamped_y,
              (unsigned)request.duration_ms, (int)source);
+#endif
+#else
+    if (out_seq != NULL) {
+        *out_seq = 0;
+    }
+    servo_cache_sync_angles(clamped_x, clamped_y);
+    ESP_LOGD(TAG, "Servo motion disabled; cached x=%d y=%d", clamped_x, clamped_y);
 #endif
     return ESP_OK;
 }
@@ -263,7 +301,12 @@ esp_err_t hal_servo_cancel_all_with_source(hal_servo_motion_source_t source) {
         return ESP_ERR_INVALID_STATE;
     }
 
+#if CONFIG_WATCHER_SERVO_MOTION_ENABLE
     return mcu_motion_stop(servo_source_to_mcu(source));
+#else
+    (void)source;
+    return ESP_OK;
+#endif
 }
 
 int hal_servo_get_angle(servo_axis_t axis) {
