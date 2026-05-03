@@ -4,7 +4,7 @@ Copy generated AnimPack assets to an SD-card style target directory and verify
 the copy matches the source exactly.
 
 Default behavior:
-  - source: release/V2.1.0/sdcard/anim
+  - source: release/V2.2.0/sdcard/anim
   - target: <target-root>/anim
 
 The script removes the target anim directory before copying so the result is a
@@ -19,7 +19,7 @@ import shutil
 from pathlib import Path
 
 
-PROJECT_VERSION = "V2.1.0"
+PROJECT_VERSION = "V2.2.0"
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 DEFAULT_SOURCE_DIR = PROJECT_ROOT / "release" / PROJECT_VERSION / "sdcard" / "anim"

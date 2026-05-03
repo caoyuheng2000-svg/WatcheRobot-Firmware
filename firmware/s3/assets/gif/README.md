@@ -44,7 +44,7 @@ python tools/sync_anim_sdcard.py --target-root F:\
 
 Generated output is written to:
 
-- `release/V2.0.0/sdcard/anim/`
+- `release/V2.2.0/sdcard/anim/`
 
 Current release note:
 

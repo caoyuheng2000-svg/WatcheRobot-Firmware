@@ -21,6 +21,28 @@
 5. 收到服务端 `sys.ack(type=sys.client.hello)` 后进入 `session_ready`。
 6. 进入业务阶段后收发 JSON 文本帧，以及 `WSPK` 二进制音频/视频/图片帧。
 
+### 2.1 板内 MCU Sensor 扩展链路
+
+`V2.2.0` 在 ESP32 与 STM32 的板内 UART/COBS 链路上接入传感器事件，不改变
+对外 WebSocket / BLE 协议冻结面。当前 ESP32 运行时消费的 sensor 帧为：
+
+- `MCU_FRAME_CLASS_SENSOR / MCU_SENSOR_MSG_TOUCH_EVENT`
+  - payload: `touch_id:u8, event_code:u8, timestamp_ms:u32-le`
+  - `event_code=1` 表示按下，`2` 表示释放，`3` 表示长按
+  - 按下事件会在行为系统空闲且 `fondle_love` 动画存在时触发
+    `fondle_love` 表情响应
+- `MCU_FRAME_CLASS_SENSOR / MCU_SENSOR_MSG_MAG_STATE`
+  - payload: `heading_deg_x100:u16-le, field_norm_uT:u16-le, quality:u8, status_bits:u8`
+  - 当前仅缓存最新状态并输出观测日志
+- `MCU_FRAME_CLASS_SENSOR / MCU_SENSOR_MSG_IMU_STATE`
+  - payload:
+    `roll_deg_x100:i16-le, pitch_deg_x100:i16-le, yaw_deg_x100:i16-le,
+    acc_norm_mg:u16-le, gyro_norm_dps_x10:u16-le, motion_flags:u8`
+  - 当前仅缓存最新状态并输出观测日志
+
+ESP32 的 `mcu_sensor_service` 对 touch/mag/imu 均采用“最新状态覆盖”缓存模型；
+状态覆盖会计入统计，IMU/MAG 高频覆盖还会回写 MCU link dropped-state 计数。
+
 ## 3. 现在必须冻结（Freeze Now）
 
 ### FZ-01 Wi-Fi 接入层

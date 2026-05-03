@@ -57,6 +57,10 @@ firmware/s3/release/*/sdcard/
 !firmware/s3/release/V2.1.0/sdcard/
 !firmware/s3/release/V2.1.0/sdcard/anim/
 !firmware/s3/release/V2.1.0/sdcard/anim/**
+!firmware/s3/release/V2.2.0/
+!firmware/s3/release/V2.2.0/sdcard/
+!firmware/s3/release/V2.2.0/sdcard/anim/
+!firmware/s3/release/V2.2.0/sdcard/anim/**
 
 # IDF Component Manager local config
 idf_component_manager.yml

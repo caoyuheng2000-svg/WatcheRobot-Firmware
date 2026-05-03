@@ -27,7 +27,7 @@ except ImportError as exc:  # pragma: no cover - runtime dependency check
     raise SystemExit("Pillow is required. Install it with: python -m pip install Pillow") from exc
 
 
-PROJECT_VERSION = "V2.1.0"
+PROJECT_VERSION = "V2.2.0"
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 DEFAULT_INPUT_DIR = PROJECT_ROOT / "assets" / "gif"
