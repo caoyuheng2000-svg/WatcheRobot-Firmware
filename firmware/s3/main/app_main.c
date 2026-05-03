@@ -345,6 +345,11 @@ static void log_firmware_version(void) {
              app_desc->idf_ver);
 }
 
+static void log_startup_banner(void) {
+    const esp_app_desc_t *app_desc = esp_app_get_description();
+    ESP_LOGI(TAG, "WatcheRobot S3 %s starting", app_desc != NULL ? app_desc->version : "unknown");
+}
+
 static void log_ble_mac_at_boot(const char *stage) {
     char mac_str[18] = {0};
     esp_err_t ret = ble_service_get_local_mac(mac_str, sizeof(mac_str));
@@ -2069,7 +2074,7 @@ void app_main(void) {
 
     configure_runtime_log_levels();
     mem_monitor_init();
-    ESP_LOGI(TAG, "WatcheRobot S3 v2.0 starting");
+    log_startup_banner();
     log_firmware_version();
     log_ble_mac_at_boot("startup");
     LOG_HEAP_STATE("app_start");
