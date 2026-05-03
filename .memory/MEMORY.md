@@ -46,6 +46,14 @@ services/  ->  protocols/  ->  hal/  ->  drivers/
    - or `flash-monitor.cmd COM24`
 5. If flashing fails with `Failed to connect to ESP32-S3: No serial data received`, the board likely did not enter bootloader. Try manual `BOOT + RESET`.
 
+## Delivery Gate
+
+- Before committing or opening/updating a PR, review the full diff for correctness and unrelated changes.
+- Before committing or opening/updating a PR, run clang-format check on changed C/C++/header files with the project `.clang-format` rule:
+  - `python C:\Users\50533\.codex\skills\clang-format-check\scripts\check_clang_format.py <changed-source-files>`
+- If clang-format fails and the change is intended for delivery, fix formatting with the same script plus `--fix`, then rerun the check.
+- Keep generated logs and local validation artifacts out of commits unless explicitly requested.
+
 ---
 
 ## Hardware Notes

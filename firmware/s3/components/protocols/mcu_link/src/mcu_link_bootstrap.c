@@ -30,9 +30,9 @@ static esp_err_t mcu_link_bootstrap_send_hello_req(void) {
     }
 
     s_last_hello_req_us = esp_timer_get_time();
-    if (s_first_hello_req_us == 0 || (previous_state != MCU_LINK_STATE_HANDSHAKING &&
-                                      previous_state != MCU_LINK_STATE_DEGRADED &&
-                                      previous_state != MCU_LINK_STATE_RECOVERING)) {
+    if (s_first_hello_req_us == 0 ||
+        (previous_state != MCU_LINK_STATE_HANDSHAKING && previous_state != MCU_LINK_STATE_DEGRADED &&
+         previous_state != MCU_LINK_STATE_RECOVERING)) {
         s_first_hello_req_us = s_last_hello_req_us;
     }
     ESP_LOGI(TAG, "MCU link hello request queued (seq=%lu wire_len=%u state=%d)", (unsigned long)seq,
@@ -122,8 +122,7 @@ bool mcu_link_bootstrap_handshake_timed_out(uint32_t timeout_ms) {
     }
 
     state = mcu_link_get_state(&s_link);
-    if (state != MCU_LINK_STATE_HANDSHAKING && state != MCU_LINK_STATE_DEGRADED &&
-        state != MCU_LINK_STATE_RECOVERING) {
+    if (state != MCU_LINK_STATE_HANDSHAKING && state != MCU_LINK_STATE_DEGRADED && state != MCU_LINK_STATE_RECOVERING) {
         return false;
     }
 
