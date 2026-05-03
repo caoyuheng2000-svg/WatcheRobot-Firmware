@@ -80,6 +80,7 @@
 #define WS_START_DISPLAY_SETTLE_MS 150U
 #define CLOUD_RUNTIME_MIN_INTERNAL_FREE_BYTES (24U * 1024U)
 #define CLOUD_RUNTIME_MIN_INTERNAL_LARGEST_BYTES (12U * 1024U)
+#define MCU_HANDSHAKE_UI_TIMEOUT_MS 5000U
 #define TOUCH_FONDLE_STATE_ID "fondle_love"
 #define TOUCH_FONDLE_ANIM_ID "fondle_love"
 #if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
@@ -116,6 +117,7 @@ typedef enum {
     IDLE_HINT_WIFI_RECOVERING,
     IDLE_HINT_WIFI_FAILED,
     IDLE_HINT_CLOUD_CONNECTING,
+    IDLE_HINT_STM32_HANDSHAKE_FAILED,
 } idle_hint_mode_t;
 
 typedef struct {
@@ -1227,7 +1229,15 @@ static void wait_for_behavior_idle(uint32_t timeout_ms) {
     }
 }
 
+static bool should_show_stm32_handshake_failure(void) {
+    return mcu_link_bootstrap_handshake_timed_out(MCU_HANDSHAKE_UI_TIMEOUT_MS) && !mcu_link_bootstrap_is_ready();
+}
+
 static idle_hint_mode_t get_idle_hint_mode(void) {
+    if (should_show_stm32_handshake_failure()) {
+        return IDLE_HINT_STM32_HANDSHAKE_FAILED;
+    }
+
     if (ble_service_is_connected()) {
         return IDLE_HINT_BLE_CONNECTED;
     }
@@ -1288,6 +1298,9 @@ static idle_hint_view_t get_idle_hint_view(idle_hint_mode_t mode) {
 
     case IDLE_HINT_CLOUD_CONNECTING:
         return (idle_hint_view_t){.text = "Connecting cloud...", .font_size = 22, .alert = false};
+
+    case IDLE_HINT_STM32_HANDSHAKE_FAILED:
+        return (idle_hint_view_t){.text = "STM32 handshake failed\nServo unavailable", .font_size = 20, .alert = true};
 
     case IDLE_HINT_READY:
     default:

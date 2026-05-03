@@ -87,8 +87,8 @@ CONFIG_WATCHER_MCU_LINK_UART_BAUD_RATE=921600
 CONFIG_WATCHER_MCU_LINK_UART_RX_BUFFER=4096
 CONFIG_WATCHER_MCU_LINK_UART_TX_BUFFER=4096
 
-# Keep servo motion output disabled for wake-word bring-up.
-# CONFIG_WATCHER_SERVO_MOTION_ENABLE is not set
+# Keep BLE, Wi-Fi, and behavior servo control routed through the STM32 motion service.
+CONFIG_WATCHER_SERVO_MOTION_ENABLE=y
 
 # Log level
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
