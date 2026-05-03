@@ -80,6 +80,8 @@
 #define WS_START_DISPLAY_SETTLE_MS 150U
 #define CLOUD_RUNTIME_MIN_INTERNAL_FREE_BYTES (24U * 1024U)
 #define CLOUD_RUNTIME_MIN_INTERNAL_LARGEST_BYTES (12U * 1024U)
+#define TOUCH_FONDLE_STATE_ID "fondle_love"
+#define TOUCH_FONDLE_ANIM_ID "fondle_love"
 #if defined(WATCHER_STRESS_BUILD) || defined(CONFIG_WATCHER_STRESS_BUILD)
 #define MCU_LINK_RUNTIME_MAX_EVENTS_PER_TICK 64
 #define MCU_LINK_RUNTIME_TASK_PERIOD_MS 2
@@ -819,9 +821,61 @@ static void maybe_complete_mcu_link_baseline_restore(const mcu_link_event_t *eve
     maybe_log_mcu_obs_state_transition(link, "baseline_restore_done");
 }
 
+static void maybe_handle_touch_behavior_event(const mcu_link_event_t *event, esp_err_t sensor_ret) {
+    mcu_touch_state_t touch = {0};
+    esp_err_t ret;
+
+    if (event == NULL || event->type != MCU_LINK_RX_EVENT_TOUCH_EVENT) {
+        return;
+    }
+
+    if (sensor_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Touch behavior skipped; sensor parse failed: %s", esp_err_to_name(sensor_ret));
+        return;
+    }
+
+    ret = mcu_sensor_service_get_latest_touch(&touch);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Touch behavior skipped; latest touch unavailable: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    if (touch.event_code != MCU_TOUCH_EVENT_PRESS) {
+        return;
+    }
+
+    if (behavior_state_is_action_active()) {
+        ESP_LOGI(TAG, "Touch press skipped while action active touch_id=%u ts=%lu", (unsigned)touch.touch_id,
+                 (unsigned long)touch.timestamp_ms);
+        return;
+    }
+
+    if (behavior_state_is_busy()) {
+        const char *current_state = behavior_state_get_current();
+        ESP_LOGI(TAG, "Touch press skipped while behavior busy state=%s touch_id=%u ts=%lu",
+                 current_state != NULL ? current_state : "<unknown>", (unsigned)touch.touch_id,
+                 (unsigned long)touch.timestamp_ms);
+        return;
+    }
+
+    if (!anim_catalog_has_type(EMOJI_ANIM_FONDLE_LOVE)) {
+        ESP_LOGW(TAG, "Touch press ignored; %s animation is unavailable in SD manifest", TOUCH_FONDLE_ANIM_ID);
+        return;
+    }
+
+    ret = behavior_state_set_with_resources(TOUCH_FONDLE_STATE_ID, "", 0, TOUCH_FONDLE_ANIM_ID, "");
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Touch press triggered %s touch_id=%u ts=%lu", TOUCH_FONDLE_STATE_ID, (unsigned)touch.touch_id,
+                 (unsigned long)touch.timestamp_ms);
+    } else {
+        ESP_LOGW(TAG, "Touch press failed to trigger %s: %s", TOUCH_FONDLE_STATE_ID, esp_err_to_name(ret));
+    }
+}
+
 static void dispatch_mcu_link_runtime_event(const mcu_link_event_t *event) {
     mcu_link_t *link;
     bool overwrote_latest = false;
+    esp_err_t sensor_ret;
 
     if (event == NULL || event->type == MCU_LINK_RX_EVENT_NONE) {
         return;
@@ -862,7 +916,8 @@ static void dispatch_mcu_link_runtime_event(const mcu_link_event_t *event) {
     (void)mcu_motion_service_handle_link_event(event);
     (void)mcu_led_service_handle_link_event(event);
     (void)mcu_power_service_handle_link_event(event);
-    (void)mcu_sensor_service_handle_link_event(event, &overwrote_latest);
+    sensor_ret = mcu_sensor_service_handle_link_event(event, &overwrote_latest);
+    maybe_handle_touch_behavior_event(event, sensor_ret);
     stress_mode_on_link_event(event);
 
     if (overwrote_latest &&

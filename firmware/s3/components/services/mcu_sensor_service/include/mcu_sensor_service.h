@@ -11,7 +11,15 @@
 extern "C" {
 #endif
 
+typedef enum {
+    MCU_TOUCH_EVENT_PRESS = 1,
+    MCU_TOUCH_EVENT_RELEASE = 2,
+    MCU_TOUCH_EVENT_LONG_PRESS = 3,
+} mcu_touch_event_code_t;
+
 typedef struct {
+    uint8_t touch_id;
+    mcu_touch_event_code_t event_code;
     bool active;
     uint32_t timestamp_ms;
 } mcu_touch_state_t;
