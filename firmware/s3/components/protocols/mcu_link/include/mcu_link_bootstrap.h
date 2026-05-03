@@ -19,6 +19,7 @@ mcu_link_t *mcu_link_bootstrap_get_link(void);
 mcu_link_state_t mcu_link_bootstrap_get_state(void);
 bool mcu_link_bootstrap_is_link_ready(void);
 bool mcu_link_bootstrap_is_ready(void);
+bool mcu_link_bootstrap_handshake_timed_out(uint32_t timeout_ms);
 
 #ifdef __cplusplus
 }

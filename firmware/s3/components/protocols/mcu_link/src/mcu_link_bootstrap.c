@@ -14,11 +14,13 @@ static const int64_t HELLO_RETRY_INTERVAL_US = 1000LL * 1000LL;
 
 static mcu_link_t s_link;
 static bool s_link_initialized;
+static int64_t s_first_hello_req_us;
 static int64_t s_last_hello_req_us;
 
 static esp_err_t mcu_link_bootstrap_send_hello_req(void) {
     uint32_t seq = 0u;
     size_t wire_len = 0u;
+    mcu_link_state_t previous_state = mcu_link_get_state(&s_link);
     esp_err_t ret;
 
     ret = mcu_link_send_hello_req(&s_link, &seq, &wire_len);
@@ -28,6 +30,11 @@ static esp_err_t mcu_link_bootstrap_send_hello_req(void) {
     }
 
     s_last_hello_req_us = esp_timer_get_time();
+    if (s_first_hello_req_us == 0 ||
+        (previous_state != MCU_LINK_STATE_HANDSHAKING && previous_state != MCU_LINK_STATE_DEGRADED &&
+         previous_state != MCU_LINK_STATE_RECOVERING)) {
+        s_first_hello_req_us = s_last_hello_req_us;
+    }
     ESP_LOGI(TAG, "MCU link hello request queued (seq=%lu wire_len=%u state=%d)", (unsigned long)seq,
              (unsigned)wire_len, (int)mcu_link_get_state(&s_link));
     ESP_LOGI(OBS_TAG, "evt=hello_req seq=%lu msg_class=%u msg_id=%u link_state=%d", (unsigned long)seq,
@@ -86,6 +93,7 @@ esp_err_t mcu_link_bootstrap_init(void) {
     }
 
     s_link_initialized = true;
+    s_first_hello_req_us = 0;
     s_last_hello_req_us = 0;
     ESP_LOGI(TAG, "MCU link bootstrap initialized (uart_ready=%d link_ready=%d ready=%d)",
              mcu_link_uart_is_ready() ? 1 : 0, mcu_link_is_link_ready(&s_link) ? 1 : 0,
@@ -103,6 +111,23 @@ bool mcu_link_bootstrap_is_link_ready(void) {
 
 bool mcu_link_bootstrap_is_ready(void) {
     return s_link_initialized && mcu_link_is_ready(&s_link);
+}
+
+bool mcu_link_bootstrap_handshake_timed_out(uint32_t timeout_ms) {
+    int64_t elapsed_us;
+    mcu_link_state_t state;
+
+    if (!s_link_initialized || s_first_hello_req_us == 0 || timeout_ms == 0) {
+        return false;
+    }
+
+    state = mcu_link_get_state(&s_link);
+    if (state != MCU_LINK_STATE_HANDSHAKING && state != MCU_LINK_STATE_DEGRADED && state != MCU_LINK_STATE_RECOVERING) {
+        return false;
+    }
+
+    elapsed_us = esp_timer_get_time() - s_first_hello_req_us;
+    return elapsed_us >= ((int64_t)timeout_ms * 1000LL);
 }
 
 esp_err_t mcu_link_bootstrap_poll(mcu_link_event_t *out_event) {
