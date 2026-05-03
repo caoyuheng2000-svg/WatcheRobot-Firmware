@@ -197,7 +197,9 @@ esp_err_t mcu_sensor_service_handle_link_event(const mcu_link_event_t *event, bo
     switch (event->type) {
     case MCU_LINK_RX_EVENT_TOUCH_EVENT: {
         mcu_touch_state_t state = {
-            .active = event->frame.payload[1] != 2u,
+            .touch_id = event->frame.payload[0],
+            .event_code = (mcu_touch_event_code_t)event->frame.payload[1],
+            .active = event->frame.payload[1] != MCU_TOUCH_EVENT_RELEASE,
             .timestamp_ms = decode_u32_le(&event->frame.payload[2]),
         };
 
@@ -207,13 +209,12 @@ esp_err_t mcu_sensor_service_handle_link_event(const mcu_link_event_t *event, bo
         ret = mcu_sensor_service_apply_touch_impl(&state);
         if (ret == ESP_OK) {
             if (MCU_SENSOR_STRESS_LOGGING_DISABLED == 0) {
-                ESP_LOGI(TAG, "Touch EVENT id=%u code=%u ts=%lu active=%d", (unsigned)event->frame.payload[0],
-                         (unsigned)event->frame.payload[1], (unsigned long)state.timestamp_ms, state.active ? 1 : 0);
-                ESP_LOGI(OBS_TAG,
-                         "evt=touch_event msg_class=%u msg_id=%u touch_id=%u code=%u timestamp_ms=%lu active=%d",
-                         (unsigned)MCU_FRAME_CLASS_SENSOR, (unsigned)MCU_SENSOR_MSG_TOUCH_EVENT,
-                         (unsigned)event->frame.payload[0], (unsigned)event->frame.payload[1],
-                         (unsigned long)state.timestamp_ms, state.active ? 1 : 0);
+                ESP_LOGI(TAG, "Touch EVENT id=%u code=%u ts=%lu active=%d", (unsigned)state.touch_id,
+                         (unsigned)state.event_code, (unsigned long)state.timestamp_ms, state.active ? 1 : 0);
+                ESP_LOGI(
+                    OBS_TAG, "evt=touch_event msg_class=%u msg_id=%u touch_id=%u code=%u timestamp_ms=%lu active=%d",
+                    (unsigned)MCU_FRAME_CLASS_SENSOR, (unsigned)MCU_SENSOR_MSG_TOUCH_EVENT, (unsigned)state.touch_id,
+                    (unsigned)state.event_code, (unsigned long)state.timestamp_ms, state.active ? 1 : 0);
             }
         }
         return ret;
