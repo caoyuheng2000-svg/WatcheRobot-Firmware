@@ -1,0 +1,53 @@
+{
+  "port": "COM6",
+  "baud": 115200,
+  "wavs": [
+    "D:/GithubRep/WatcheRobot-Firmware/tools/voice_wake/voice_wake_test_assets/jarvis_tts_male.wav"
+  ],
+  "volumes": [
+    10,
+    20,
+    30,
+    40,
+    50,
+    60,
+    70,
+    80,
+    90,
+    100
+  ],
+  "speech_rates": [
+    1.0
+  ],
+  "trials": 10,
+  "wait_sec": 8.0,
+  "gap_sec": 5.0,
+  "wake_keywords": [
+    "Wake word detected",
+    "Jarvis detected",
+    "wakeup"
+  ],
+  "wait_ready": true,
+  "ready_keywords": [
+    "wake_idle frame="
+  ],
+  "ready_timeout_sec": 35.0,
+  "tts_mode": false,
+  "test_mode": "wake-only: wake rate",
+  "volume_mode": "windows",
+  "distance_cm": "5",
+  "distances_cm": [
+    "5"
+  ],
+  "angle": "正面",
+  "environment_note": "quiet room wake-only #34",
+  "output_device": "系统默认",
+  "wav_scope": "selected",
+  "volume_start": "10",
+  "volume_end": "100",
+  "volume_step": "10",
+  "speech_rate_preset": "standard 1.0x",
+  "ready_preset": "relaxed: wake_idle only",
+  "wake_keywords_text": "Wake word detected,Jarvis detected,wakeup",
+  "ready_keywords_text": "wake_idle frame="
+}
