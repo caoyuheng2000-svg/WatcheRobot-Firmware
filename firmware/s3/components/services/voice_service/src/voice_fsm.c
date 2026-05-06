@@ -370,11 +370,12 @@ static int start_recording(void) {
     /* Initialize VAD for wake word mode */
     if (g_recording_triggered_by_wake_word) {
         vad_reset();
-        ESP_LOGI(TAG,
-                 "VAD enabled: silence_timeout=%dms, rms_threshold=%d, min_speech=%dms, wake_grace=%dms, no_speech=%dms, "
-                 "max_recording=%dms",
-                 CONFIG_VAD_SILENCE_TIMEOUT_MS, CONFIG_VAD_RMS_THRESHOLD, CONFIG_VAD_MIN_SPEECH_MS,
-                 CONFIG_VAD_WAKE_GRACE_MS, CONFIG_VAD_NO_SPEECH_TIMEOUT_MS, CONFIG_VAD_MAX_RECORDING_MS);
+        ESP_LOGI(
+            TAG,
+            "VAD enabled: silence_timeout=%dms, rms_threshold=%d, min_speech=%dms, wake_grace=%dms, no_speech=%dms, "
+            "max_recording=%dms",
+            CONFIG_VAD_SILENCE_TIMEOUT_MS, CONFIG_VAD_RMS_THRESHOLD, CONFIG_VAD_MIN_SPEECH_MS, CONFIG_VAD_WAKE_GRACE_MS,
+            CONFIG_VAD_NO_SPEECH_TIMEOUT_MS, CONFIG_VAD_MAX_RECORDING_MS);
     }
 #endif
 
