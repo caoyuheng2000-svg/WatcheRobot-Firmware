@@ -29,6 +29,31 @@ menu "Watcher Voice Service"
         help
             Require this much detected speech before VAD can stop recording.
 
+    config VAD_WAKE_GRACE_MS
+        int "Wake-word recording VAD grace period"
+        default 600
+        depends on ENABLE_WAKE_WORD
+        help
+            Ignore audio frames for this long after wake-word recording starts.
+            This prevents wake-word tail audio from being counted as user speech.
+
+    config VAD_NO_SPEECH_TIMEOUT_MS
+        int "Wake-word recording no-speech timeout"
+        default 3000
+        depends on ENABLE_WAKE_WORD
+        help
+            Stop a wake-word-triggered recording if no speech is detected
+            within this many milliseconds after wake.
+
+    config VAD_MAX_RECORDING_MS
+        int "Wake-word recording max duration"
+        default 0
+        depends on ENABLE_WAKE_WORD
+        help
+            Stop a wake-word-triggered recording after this many milliseconds,
+            even if silence detection does not fire. Set to 0 to disable
+            forced max-duration stopping.
+
     config VOICE_TASK_STACK_SIZE
         int "Voice recorder task stack size"
         default 8192 if ENABLE_WAKE_WORD

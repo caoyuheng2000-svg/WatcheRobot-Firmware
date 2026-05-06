@@ -217,6 +217,14 @@ void ws_handle_tts_binary(const uint8_t *data, int len);
 void ws_tts_complete(void);
 
 /**
+ * Finish a voice session that did not produce a valid dialog result.
+ *
+ * This clears response-wait state, releases cloud-audio busy state, restores
+ * the standby UI, and resumes wake-word detection.
+ */
+void ws_client_finish_voice_session(const char *reason);
+
+/**
  * Check response timeout and recover wake-word mode if needed.
  */
 void ws_tts_timeout_check(void);

@@ -2308,16 +2308,30 @@ void ws_tts_complete(void) {
     ws_finish_tts_playback();
 }
 
+void ws_client_finish_voice_session(const char *reason) {
+    const char *safe_reason = (reason != NULL && reason[0] != '\0') ? reason : "unknown";
+
+    ESP_LOGI(TAG, "Voice session finished: reason=%s", safe_reason);
+    s_waiting_for_response = false;
+    s_timeout_display_count = 0;
+    s_response_wait_start_time = 0;
+    sfx_service_set_cloud_audio_busy(false);
+
+    behavior_state_set_with_resources("standby", NULL, 0, NULL, "");
+
+#ifdef CONFIG_ENABLE_WAKE_WORD
+    voice_recorder_resume_wake_word();
+#endif
+}
+
 void ws_tts_timeout_check(void) {
 #ifdef CONFIG_ENABLE_WAKE_WORD
     if (s_waiting_for_response) {
         int64_t elapsed_ms = (esp_timer_get_time() - s_response_wait_start_time) / 1000;
         if (elapsed_ms > WS_RESPONSE_TIMEOUT_MS && s_timeout_display_count < 1) {
             ESP_LOGW(TAG, "response timeout (%lld ms), resuming wake word detection", elapsed_ms);
-            s_waiting_for_response = false;
-            voice_recorder_resume_wake_word();
-            behavior_state_set_with_text("error", "Timeout", 0);
             s_timeout_display_count++;
+            ws_client_finish_voice_session("response_timeout");
         }
     }
 #endif

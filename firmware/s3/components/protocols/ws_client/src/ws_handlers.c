@@ -38,6 +38,21 @@
 #define WS_DEVICE_ERROR_CODE_SERVO 1503
 #define WS_DEVICE_ERROR_CODE_OTA 1504
 
+static bool text_is_blank(const char *text) {
+    if (text == NULL) {
+        return true;
+    }
+
+    while (*text != '\0') {
+        if (!isspace((unsigned char)*text)) {
+            return false;
+        }
+        text++;
+    }
+
+    return true;
+}
+
 typedef struct {
     SemaphoreHandle_t lock;
     SemaphoreHandle_t frame_ready_sem;
@@ -894,8 +909,14 @@ void on_asr_result_handler(const ws_text_event_t *event) {
     }
 
     ESP_LOGI(TAG, "ASR result: %s", event->text);
+    if (text_is_blank(event->text)) {
+        ESP_LOGI(TAG, "Empty ASR result, finishing no-speech session");
+        ws_client_finish_voice_session("empty_asr");
+        return;
+    }
+
     snprintf(req.state_id, sizeof(req.state_id), "%s", "processing");
-    snprintf(req.text, sizeof(req.text), "%s", event->text[0] != '\0' ? event->text : "Listening...");
+    snprintf(req.text, sizeof(req.text), "%s", event->text);
     if (control_ingress_submit_state_text(&req) != ESP_OK) {
         ESP_LOGW(TAG, "Failed to enqueue ASR state update");
     }
